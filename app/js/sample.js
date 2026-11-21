@@ -33,16 +33,16 @@ export function sampleData() {
   };
   const B = (id, art, shelf, order, extra = {}) => newBook({ id, title: articles.find((a) => a.id === art).title, articleIds: [art], shelfId: shelf, order, ...extra });
   const books = [
-    B('bk1', 's1', 'make', 1, { face: 'cover', pop: 'この記事から、\n全部始まりました。', design: { ...newBook({}).design, motif: 'tablet' } }),
+    B('bk1', 's1', 'make', 1, { face: 'cover', pop: 'この記事から、\n全部始まりました。', blurb: 'iPadだけで、最初のひとつを作ってみた記録（架空のサンプル）。', forWhom: '作りたいものはあるけど、最初の一歩で止まっている人へ', design: { ...newBook({}).design, motif: 'tablet' } }),
     B('bk2', 's2', 'make', 2),
-    B('bk3', 's3', 'make', 3, { pop: '何度でも、また作る。', popOnShelf: false, blurb: 'うまくいかなかった日も、残しておこう。そう思って書いた一冊です。', design: { ...newBook({}).design, color: '#b45f43', motif: 'notebook' } }),
+    B('bk3', 's3', 'make', 3, { pop: '何度でも、また作る。', popOnShelf: false, blurb: 'うまくいかなかった日も、残しておこう。そう思って書いた一冊です。', forWhom: '途中でやめたものが、フォルダにたまっている人へ', design: { ...newBook({}).design, color: '#b45f43', motif: 'notebook' } }),
     B('bk4', 's4', 'make', 4),
     B('bk5', 's5', 'life', 1, { design: { ...newBook({}).design, color: '#2e4566', motif: 'rain' } }),
     B('bk6', 's6', 'life', 2, { face: 'cover', pop: 'あまり読まれてないけど、\n好きな一本', design: { ...newBook({}).design, color: '#efe8d8', motif: 'sprig' } }),
     B('bk7', 's7', 'life', 3),
     B('bk9', 's11', 'life', 4),
     B('bk10', 's12', 'make', 5),
-    newBook({ id: 'bk8', title: '旅の途中', articleIds: ['s8', 's9', 's10'], kind: 'serial', mode: 'novel', writing: 'vertical', shelfId: 'trip', order: 1, seriesStatus: 'ongoing', blurb: '知らない駅で降りた「わたし」が、背表紙のない本ばかりの本屋に出会う連載小説（架空のサンプル）。', design: { ...newBook({}).design, color: '#e6dcc4', motif: 'mountain', titleWriting: 'vertical' } }),
+    newBook({ id: 'bk8', title: '旅の途中', articleIds: ['s8', 's9', 's10'], kind: 'serial', mode: 'novel', writing: 'vertical', shelfId: 'trip', order: 1, seriesStatus: 'ongoing', blurb: '知らない駅で降りた「わたし」が、背表紙のない本ばかりの本屋に出会う連載小説（架空のサンプル）。', forWhom: '静かな物語を、少しずつ読みたい人へ', pop: '第1話の最後の一行が好きです', design: { ...newBook({}).design, color: '#e6dcc4', motif: 'mountain', titleWriting: 'vertical' } }),
   ];
   return { shop, articles, books, images: [] };
 }

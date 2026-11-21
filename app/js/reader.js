@@ -14,7 +14,7 @@ const markKey = (b) => `bookshop:mark:${S.source}:${b.id}`;
 const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
 
-export function openReader(book, { startChapter = null } = {}) {
+export function openReader(book, { startChapter = null, startArticleId = null } = {}) {
   const arts = bookArticles(book).filter((a) => a.html != null);
   if (!arts.length) { toast('この本は本文を読めません'); return; }
   const prevFocus = document.activeElement;
@@ -24,7 +24,11 @@ export function openReader(book, { startChapter = null } = {}) {
     fs: p.fs, lh: p.lh,
   };
   const last = lsGet(posKey(book));
-  if (startChapter != null) st.ch = startChapter;
+  if (startArticleId != null) { const i = arts.findIndex((a) => a.id === startArticleId); if (i >= 0) startChapter = i; }
+  // a chapter chosen explicitly (e.g. from the table of contents) always opens at its beginning,
+  // independent of the saved reading position
+  const explicit = startChapter != null && startChapter >= 0 && startChapter < arts.length;
+  if (explicit) st.ch = startChapter;
   else if (last && last.ch < arts.length) st.ch = last.ch;
   if (last && last.writing) st.writing = last.writing;
 
@@ -32,17 +36,21 @@ export function openReader(book, { startChapter = null } = {}) {
   const paper = h('article', { class: 'reading-paper', tabindex: '0', 'aria-labelledby': 'reader-title' });
   const stage = h('div', { class: 'reader-stage' }, paper);
   const progress = h('span', { class: 'progress-text', 'aria-live': 'polite' });
-  const prevBtn = h('button', { type: 'button', class: 'btn small' }, icon('left'), '前の章');
-  const nextBtn = h('button', { type: 'button', class: 'btn small' }, '次の章', icon('right'));
+  const multi = arts.length > 1;
+  const prevBtn = h('button', { type: 'button', class: 'btn nav' }, icon('left'), '前の章');
+  const nextBtn = h('button', { type: 'button', class: 'btn nav' }, '次の章', icon('right'));
   let pop = null;
-  const closeBtn = h('button', { type: 'button', class: 'btn small', 'aria-label': '棚へ戻る' }, icon('left'), '棚へ戻る');
-  const tocBtn = h('button', { type: 'button', class: 'icon-btn', 'aria-label': '目次', 'aria-haspopup': 'true' }, icon('list'));
-  const setBtn = h('button', { type: 'button', class: 'icon-btn', 'aria-label': '表示の設定', 'aria-haspopup': 'true' }, icon('text'));
-  const markBtn = h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'しおりを挟む' }, icon('bookmark'));
+  const tool = (iconName, label, aria) => h('button', { type: 'button', class: 'tool', 'aria-label': aria || label }, icon(iconName), h('span', { class: 'tool-label', 'aria-hidden': 'true' }, label));
+  const closeBtn = h('button', { type: 'button', class: 'btn back' }, icon('left'), '棚へ戻る');
+  const tocBtn = tool('list', '目次');
+  tocBtn.setAttribute('aria-haspopup', 'true');
+  const setBtn = tool('text', '表示', '表示の設定');
+  setBtn.setAttribute('aria-haspopup', 'true');
+  const markBtn = tool('bookmark', 'しおり', 'しおりを挟む');
   const el = h('div', { class: 'reader', role: 'dialog', 'aria-modal': 'true', 'aria-label': `${book.title}を読む` },
-    h('div', { class: 'reader-top' }, closeBtn, title, tocBtn, setBtn, markBtn),
+    h('div', { class: 'reader-top' }, closeBtn, title, h('div', { class: 'tools' }, tocBtn, setBtn, markBtn)),
     stage,
-    h('div', { class: 'reader-bottom' }, prevBtn, progress, nextBtn));
+    h('div', { class: `reader-bottom${multi ? '' : ' single'}` }, multi ? prevBtn : h('span'), progress, multi ? nextBtn : h('span')));
   document.body.appendChild(el);
   document.body.style.overflow = 'hidden';
 
@@ -69,8 +77,9 @@ export function openReader(book, { startChapter = null } = {}) {
   paper.addEventListener('scroll', savePos, { passive: true });
 
   function updateProgress() {
-    const pct = Math.round(ratio() * 100);
-    progress.textContent = `${arts.length > 1 ? `${st.ch + 1} / ${arts.length}章・` : ''}${pct}%`;
+    const scrollable = st.writing === 'vertical' ? paper.scrollWidth > paper.clientWidth + 2 : paper.scrollHeight > paper.clientHeight + 2;
+    const chap = arts.length > 1 ? `${st.ch + 1} / ${arts.length}章` : '';
+    progress.textContent = scrollable ? `${chap ? chap + '・' : ''}${Math.round(ratio() * 100)}%` : chap;
   }
 
   function render(restore = null) {
@@ -92,7 +101,26 @@ export function openReader(book, { startChapter = null } = {}) {
     paper.replaceChildren(chapter);
     prevBtn.disabled = st.ch === 0;
     nextBtn.disabled = st.ch >= arts.length - 1;
+    fitPaper();
     requestAnimationFrame(() => { setRatio(restore || 0); updateProgress(); });
+  }
+
+  /**
+   * Size the paper. Horizontal: a fixed comfortable measure (CSS). Vertical: the paper is as wide as
+   * its text (so short chapters sit on a page in the middle, not at the screen edge), up to a maximum;
+   * longer text scrolls inside the paper from right to left.
+   */
+  function fitPaper() {
+    paper.style.width = '';
+    if (st.writing !== 'vertical') return;
+    const avail = stage.clientWidth - parseFloat(getComputedStyle(stage).paddingLeft) * 2;
+    const maxW = Math.min(avail, 1120);
+    const minW = Math.min(avail, avail < 600 ? avail : 560);
+    paper.style.width = maxW + 'px';
+    const cs = getComputedStyle(paper);
+    const chapter = paper.firstElementChild;
+    const need = (chapter ? chapter.getBoundingClientRect().width : 0) + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 4;
+    paper.style.width = Math.max(minW, Math.min(maxW, need)) + 'px';
   }
 
   function buildBody(html) {
@@ -132,7 +160,10 @@ export function openReader(book, { startChapter = null } = {}) {
   }
   tocBtn.addEventListener('click', () => {
     if (pop) { closePop(); return; }
-    openPop(h('div', null, h('h3', null, '目次'), h('div', { class: 'toc' }, arts.map((a, i) => h('button', { type: 'button', 'aria-current': String(i === st.ch), onclick: () => { closePop(); st.ch = i; render(0); } }, `${i + 1}. ${a.title || '無題'}`)))), '目次');
+    const mark = lsGet(markKey(book));
+    openPop(h('div', null, h('h3', null, '目次'),
+      mark && mark.ch < arts.length ? h('button', { type: 'button', class: 'btn small', style: 'margin-bottom:8px', onclick: () => { closePop(); st.ch = mark.ch; render(mark.r || 0); } }, icon('bookmark'), `しおりの位置へ（${multi ? `${mark.ch + 1}章・` : ''}${Math.round((mark.r || 0) * 100)}%）`) : null,
+      h('div', { class: 'toc' }, arts.map((a, i) => h('button', { type: 'button', 'aria-current': String(i === st.ch), onclick: () => { closePop(); st.ch = i; render(0); lsSet(posKey(book), { ch: i, r: 0, writing: st.writing }); } }, `${i + 1}. ${a.title || '無題'}`)))), '目次');
   });
   setBtn.addEventListener('click', () => {
     if (pop) { closePop(); return; }
@@ -149,10 +180,11 @@ export function openReader(book, { startChapter = null } = {}) {
   });
   markBtn.addEventListener('click', () => {
     const ok = lsSet(markKey(book), { ch: st.ch, r: ratio(), at: Date.now() });
+    markBtn.classList.toggle('on', ok);
     toast(ok ? 'しおりを挟みました（この端末に保存）' : 'しおりを保存できませんでした');
   });
   const mark = lsGet(markKey(book));
-  if (mark && startChapter == null && !last) { st.ch = Math.min(mark.ch, arts.length - 1); }
+  if (mark && !explicit && !last) { st.ch = Math.min(mark.ch, arts.length - 1); }
 
   function close() {
     savePos.flush && savePos.flush();
@@ -165,7 +197,7 @@ export function openReader(book, { startChapter = null } = {}) {
   closeBtn.addEventListener('click', close);
   let lastR = 0;
   paper.addEventListener('scroll', () => { lastR = ratio(); }, { passive: true });
-  const onResize = debounce(() => { const r = lastR; requestAnimationFrame(() => setRatio(r)); }, 150);
+  const onResize = debounce(() => { const r = lastR; fitPaper(); requestAnimationFrame(() => setRatio(r)); }, 150);
   window.addEventListener('resize', onResize);
   function onKey(e) {
     if (!el.isConnected) return;
@@ -186,8 +218,9 @@ export function openReader(book, { startChapter = null } = {}) {
     e.preventDefault();
   }, { passive: false });
 
-  render(last && last.ch === st.ch ? last.r : mark && !last ? mark.r : 0);
-  if (last && (last.ch || last.r > 0.02)) toast('前回の続きから表示しています');
+  const resume = !explicit && last && last.ch === st.ch;
+  render(explicit ? 0 : resume ? last.r : mark && !last ? mark.r : 0);
+  if (resume && (last.ch || last.r > 0.02)) toast('前回の続きから表示しています');
   requestAnimationFrame(() => closeBtn.focus());
   return { close, el, state: st, setRatio, ratio };
 }

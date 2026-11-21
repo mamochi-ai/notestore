@@ -83,12 +83,16 @@ export function luminance(hex) {
 }
 
 /** Ink color for text printed on a book of color `bg` in theme `t`. */
+export function contrast(a, b) {
+  const x = luminance(a), y = luminance(b);
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+/** Ink for text printed on a book of colour `bg`: whichever ink reads best (foil only when legible). */
 export function inkFor(bg, t) {
-  const L = luminance(bg);
-  if (L > 0.42) return t.id === 'future' ? '#1d2c3a' : '#3a2f25';
-  if (t.foil && t.material === 'leather') return t.foil;
-  if (t.id === 'future') return '#dff6fb';
-  return '#f6ecd3';
+  const dark = t.id === 'future' ? '#1d2c3a' : '#33291f';
+  const light = t.id === 'future' ? '#e8f8fc' : '#f8efd8';
+  if (t.foil && t.material === 'leather' && contrast(t.foil, bg) >= 4) return t.foil;
+  return contrast(dark, bg) >= contrast(light, bg) ? dark : light;
 }
 
 export function applyThemeVars(t, root = document.documentElement) {

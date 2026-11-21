@@ -44,7 +44,7 @@ export function newBook(fields) {
     kind: 'single', mode: 'post', writing: 'horizontal',
     shelfId: UNSORTED, order: Date.now(), face: 'spine',
     hidden: false, mergedInto: null, seriesStatus: null,
-    pop: '', popOnShelf: true, blurb: '', shareBody: false,
+    pop: '', popOnShelf: true, blurb: '', forWhom: '', shareBody: false,
     design: {
       color: null, material: null, motif: null,
       coverImageId: undefined, coverPos: { x: 50, y: 50, s: 1 },

@@ -164,11 +164,13 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     const [fc2] = await Promise.all([page.waitForEvent('filechooser'), page.locator('.modal button', { hasText: '画像をアップロード' }).click()]);
     await fc2.setFiles(png);
     await page.waitForSelector('.crop-frame');
-    await page.getByRole('tab', { name: 'POP・紹介' }).click();
-    await page.locator('.modal textarea').first().fill('この記事から、全部始まりました。');
+    await page.getByRole('tab', { name: '紹介・おすすめ' }).click();
+    await page.getByLabel('店主のおすすめ理由（120字まで・棚のPOPにもなります）').fill('この記事から、全部始まりました。');
+    await page.getByLabel('こんな人へ（80字まで）').fill('最初の一歩で止まっている人へ');
     await page.locator('.modal footer button', { hasText: '保存' }).click();
     await page.waitForTimeout(400);
-    const d = await S(page, (st) => { const b = st.S.books.get(document.querySelector('.detail .book')?.dataset.id) || [...st.S.books.values()].find((x) => x.pop); return { cover: b.design.coverImageId, spine: b.design.spineImageId, pos: b.design.coverPos, pop: b.pop, layout: b.design.coverLayout }; });
+    const d = await S(page, (st) => { const b = st.S.books.get(document.querySelector('.detail .book')?.dataset.id) || [...st.S.books.values()].find((x) => x.pop); return { cover: b.design.coverImageId, spine: b.design.spineImageId, pos: b.design.coverPos, pop: b.pop, forWhom: b.forWhom, layout: b.design.coverLayout }; });
+    assert(d.forWhom === '最初の一歩で止まっている人へ', 'forWhom not saved');
     assert(d.cover && d.spine && d.cover !== d.spine, 'separate cover/spine images ' + JSON.stringify(d));
     assert(d.pos.x === 20 && d.pos.s === 1.5, 'crop not saved ' + JSON.stringify(d.pos));
     const fit = await page.locator('.detail .book .book-art').first().evaluate((i) => getComputedStyle(i).objectFit);
@@ -216,6 +218,8 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     await p2.locator('.modal footer button', { hasText: '復元する' }).click();
     await p2.waitForSelector('.editbar');
     const c2 = await S(p2, (st) => ({ b: st.S.books.size, a: st.S.articles.size, i: st.S.images.size, theme: st.S.shop.theme }));
+    const fw = await S(p2, (st) => [...st.S.books.values()].some((b) => b.forWhom === '最初の一歩で止まっている人へ'));
+    assert(fw, 'forWhom lost in backup/restore');
     assert(JSON.stringify(c2) === JSON.stringify(counts), `mismatch ${JSON.stringify(counts)} vs ${JSON.stringify(c2)}`);
     const imgOk = await p2.locator('.book .book-art').first().evaluate((i) => new Promise((r) => (i.complete ? r(i.naturalWidth > 0) : (i.onload = () => r(i.naturalWidth > 0)))));
     assert(imgOk, 'restored image not displayed');
@@ -372,6 +376,170 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     assert(text2 === text0, 'text changed after font size');
     await ctx.close();
     return `ratio ${r0.toFixed(3)} → ${r1.toFixed(3)}`;
+  });
+
+  // ---------- shelf layout ----------
+  await test('棚の配置：保存順を維持・背表紙は密着・本の下端とブックエンドが棚板に接地・少ない棚は中央寄せ', async () => {
+    const out = [];
+    for (const vp of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1024, height: 768 }]) {
+      const { ctx, page } = await newPage(vp);
+      await page.goto(BASE);
+      await page.getByText('サンプルの本屋を見る').click();
+      await page.waitForSelector('.bay .book');
+      for (const t of ['warm', 'library', 'abandoned', 'overseas', 'luxury', 'future']) {
+        await page.evaluate(async (t) => { const st = await import('/app/js/state.js'); st.S.shop.theme = t; (await import('/app/js/main.js')).rerender(); }, t);
+        const r = await page.evaluate(async () => {
+          const st = await import('/app/js/state.js');
+          const res = { order: true, bottom: 0, gaps: [], ends: 0, center: 0 };
+          for (const row of document.querySelectorAll('.bay-row:not(.featured)')) {
+            const rb = row.getBoundingClientRect();
+            const kids = [...row.children];
+            for (const k of kids) {
+              if (k.classList.contains('book') || k.classList.contains('pop-mini') || k.classList.contains('bookend')) res.bottom = Math.max(res.bottom, Math.abs(k.getBoundingClientRect().bottom - rb.bottom));
+            }
+            for (let i = 1; i < kids.length; i++) {
+              const a = kids[i - 1], b = kids[i];
+              const gap = b.getBoundingClientRect().left - a.getBoundingClientRect().right;
+              if (a.classList.contains('spine') && b.classList.contains('spine')) res.gaps.push(gap);
+              if (b.classList.contains('bookend') || a.classList.contains('bookend')) res.ends = Math.max(res.ends, gap);
+            }
+            if (row.classList.contains('centered')) {
+              const first = kids[0].getBoundingClientRect(), last = kids[kids.length - 1].getBoundingClientRect();
+              res.center = Math.max(res.center, Math.abs((first.left - rb.left) - (rb.right - last.right)));
+            }
+          }
+          // order per shelf must follow saved order
+          for (const s of st.S.shop.shelves) {
+            const want = st.booksOnShelf(s.id).map((b) => b.id);
+            const sec = [...document.querySelectorAll('.shelf-group')].find((g) => g.getAttribute('aria-label') === s.name);
+            if (!sec) continue;
+            const got = [...sec.querySelectorAll('.book')].map((e) => e.dataset.id);
+            if (JSON.stringify(got) !== JSON.stringify(want)) res.order = false;
+          }
+          return res;
+        });
+        assert(r.order, `${t}@${vp.width}: order changed`);
+        assert(r.bottom <= 1, `${t}@${vp.width}: item not on shelf (${r.bottom}px)`);
+        assert(r.gaps.every((g) => g >= 0 && g <= 2), `${t}@${vp.width}: spine gaps ${r.gaps}`);
+        assert(r.ends <= 2, `${t}@${vp.width}: bookend not against book (${r.ends}px)`);
+        assert(r.center <= 2, `${t}@${vp.width}: group not centred (${r.center}px)`);
+      }
+      out.push(vp.width);
+      await ctx.close();
+    }
+    return `6テーマ × 幅 ${out.join('/')}`;
+  });
+
+  await test('本の詳細：情報の順番・読了目安・未入力項目の非表示・目次から章を直接開く', async () => {
+    const { ctx, page } = await newPage({ width: 1024, height: 768 });
+    await page.goto(BASE);
+    await page.getByText('サンプルの本屋を見る').click();
+    await page.locator('.bay .book.spine[data-id="bk8"]').click();
+    const order = await page.locator('.detail').evaluate((d) => [...d.children].map((c) => c.className || c.tagName).join('|'));
+    const idx = (k) => order.indexOf(k);
+    assert(idx('detail-cover') < idx('meta') && idx('meta') < idx('blurb') && idx('blurb') < idx('reco') && idx('reco') < idx('detail-actions') && idx('detail-actions') < idx('chapters'), 'panel order: ' + order);
+    const chips = await page.locator('.detail .meta').innerText();
+    assert(/読了目安 約\d+分/.test(chips), 'reading time missing: ' + chips);
+    // book with no forWhom / pop / blurb → no empty headings
+    await page.locator('.bay .book.spine[data-id="bk4"]').click();
+    assert(!(await page.locator('.detail .reco, .detail .blurb').count()), 'empty sections shown');
+    // TOC: open chapter 3 directly
+    await page.locator('.bay .book.spine[data-id="bk8"]').click();
+    await page.locator('.detail .chapters .ch-link').nth(2).click();
+    await page.waitForSelector('.reader');
+    const t = await page.locator('.reader .ch-title').innerText();
+    assert(t.includes('第3話'), 'wrong chapter opened: ' + t);
+    await page.locator('.reader-bottom button', { hasText: '前の章' }).click();
+    assert((await page.locator('.reader .ch-title').innerText()).includes('第2話'), 'prev chapter');
+    await page.locator('.reader-bottom button', { hasText: '次の章' }).click();
+    assert((await page.locator('.reader .ch-title').innerText()).includes('第3話'), 'next chapter');
+    // explicit chapter ignores saved position; plain "read" resumes it
+    await page.locator('.reader .btn.back').click();
+    await page.waitForSelector('.reader', { state: 'detached' });
+    await page.locator('.detail .chapters .ch-link').nth(0).click();
+    assert((await page.locator('.reader .ch-title').innerText()).includes('第1話'), 'explicit chapter 1');
+    await page.locator('.reader .btn.back').click();
+    await page.locator('.detail button', { hasText: 'この本を読む' }).click();
+    assert((await page.locator('.reader .ch-title').innerText()).includes('第1話'), 'resume last chapter');
+    await page.keyboard.press('Escape');
+    assert(!(await page.locator('.reader').count()), 'Escape back to shelf');
+    // the reading-time constant lives in one place
+    const cpm = await page.evaluate(async () => (await import('/app/js/readtime.js')).CHARS_PER_MINUTE);
+    assert(cpm === 500, 'cpm');
+    // link-shared book without body: no reading time, chapters link to note only
+    await ctx.close();
+    return order.split('|').join(' > ');
+  });
+
+  await test('読書画面：短い章は紙面が中央・長い章は最後まで読める（縦/横・iPhone/iPad）', async () => {
+    const res = [];
+    for (const vp of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1024, height: 768 }]) {
+      const { ctx, page } = await newPage(vp);
+      await page.goto(BASE);
+      await page.getByText('サンプルの本屋を見る').click();
+      await page.evaluate(async () => {
+        const st = await import('/app/js/state.js');
+        st.S.articles.get('s9').html = '<h2>見出し</h2><p>' + '長い章の本文です。数字12と345、English、「かぎかっこ」。'.repeat(150) + '</p><ul><li>リスト</li></ul><blockquote><p>引用</p></blockquote><p>最後の一文ENDMARK。</p>';
+      });
+      for (const mode of ['vertical', 'horizontal']) {
+        for (const [ch, label] of [[0, 'short'], [1, 'long']]) {
+          await page.evaluate(async ([mode, ch]) => {
+            localStorage.clear();
+            const st = await import('/app/js/state.js'); const r = await import('/app/js/reader.js');
+            document.querySelector('.reader')?.remove();
+            const b = st.S.books.get('bk8'); b.writing = mode;
+            r.openReader(b, { startChapter: ch });
+          }, [mode, ch]);
+          await page.waitForTimeout(450);
+          const m = await page.evaluate(() => {
+            const p = document.querySelector('.reading-paper'), r = p.getBoundingClientRect(), vw = innerWidth;
+            return { left: r.left, right: vw - r.right, w: r.width, sw: p.scrollWidth, cw: p.clientWidth, sh: p.scrollHeight, ch: p.clientHeight };
+          });
+          if (vp.width > 600) assert(Math.abs(m.left - m.right) <= 2, `${mode}/${label}@${vp.width}: paper not centred ${JSON.stringify(m)}`);
+          else assert(m.left <= 8 && m.right <= 8, `${mode}/${label}@${vp.width}: phone paper should use the width`);
+          if (label === 'long') {
+            // scroll to the very end and check the last sentence is visible inside the paper
+            await page.evaluate((mode) => { const p = document.querySelector('.reading-paper'); if (mode === 'vertical') p.scrollLeft = -(p.scrollWidth); else p.scrollTop = p.scrollHeight; }, mode);
+            await page.waitForTimeout(250);
+            const vis = await page.evaluate(() => {
+              const p = document.querySelector('.reading-paper').getBoundingClientRect();
+              const w = document.createTreeWalker(document.querySelector('.reading-paper'), NodeFilter.SHOW_TEXT);
+              let n; while ((n = w.nextNode())) if (n.nodeValue.includes('ENDMARK')) { const rg = document.createRange(); rg.selectNodeContents(n); const r = rg.getBoundingClientRect(); return r.left >= p.left - 1 && r.right <= p.right + 1 && r.top >= p.top - 1 && r.bottom <= p.bottom + 1; }
+              return false;
+            });
+            assert(vis, `${mode}@${vp.width}: end of long chapter not reachable`);
+            const over = await page.evaluate(() => { const p = document.querySelector('.reading-paper').getBoundingClientRect(); return [...document.querySelectorAll('.reading-paper .chapter > *')].filter((e) => getComputedStyle(e).writingMode === 'horizontal-tb' && e.getBoundingClientRect().width > p.width + 1).length; });
+            assert(over === 0, 'element wider than paper');
+          }
+          if (mode === 'vertical' && label === 'short' && vp.width >= 1024) await page.screenshot({ path: path.join(SHOTS, 'reader-short-vertical.png') });
+          if (mode === 'vertical' && label === 'long' && vp.width === 390) await page.screenshot({ path: path.join(SHOTS, 'reader-long-vertical-phone.png') });
+          res.push(`${mode[0]}/${label}@${vp.width}`);
+        }
+      }
+      await ctx.close();
+    }
+    return res.length + ' cases';
+  });
+
+  await test('既存データ互換：新項目の無い旧形式の本をそのまま表示できる', async () => {
+    const { ctx, page } = await newPage();
+    await page.goto(BASE);
+    await page.evaluate(async () => {
+      const db = await import('/app/js/db.js');
+      const shop = { key: 'shop', schema: 1, name: '旧データの本屋', tagline: '', owner: '旧店主', intro: '', profileUrl: '', avatarImageId: null, theme: 'luxury', featured: [], featuredPop: '', shelves: [{ id: 'unsorted', name: '未分類' }] };
+      const art = { id: 'old1', title: '旧形式の記事', html: '<p>' + 'あ'.repeat(1200) + '</p>', status: 'publish', url: 'https://note.com/x/n/old1', images: [] };
+      // book saved by the previous version: no forWhom field
+      const book = { id: 'b_old', title: '旧形式の本', spineTitle: null, articleIds: ['old1'], kind: 'single', mode: 'post', writing: 'horizontal', shelfId: 'unsorted', order: 1, face: 'spine', hidden: false, mergedInto: null, seriesStatus: null, pop: '', popOnShelf: true, blurb: '', shareBody: false, design: { color: null, material: null, motif: null, coverPos: { x: 50, y: 50, s: 1 }, spineImageId: null, spinePos: { x: 50, y: 50, s: 1 }, showTitle: true, showAuthor: true, titleColor: null, titleAlign: 'top', titleWriting: 'horizontal', spineStyle: null } };
+      await db.write({ put: { meta: [shop], articles: [art], books: [book] } });
+    });
+    await page.reload();
+    await page.waitForSelector('.bay .book');
+    await page.locator('.bay .book').first().click();
+    const chips = await page.locator('.detail .meta').innerText();
+    assert(chips.includes('約2分'), 'reading time for 1200 chars: ' + chips);
+    assert(!(await page.locator('.detail .reco').count()), 'empty forWhom shown');
+    await ctx.close();
+    return chips.replace(/\n/g, ' ');
   });
 
   // ---------- published ZIP ----------

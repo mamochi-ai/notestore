@@ -52,7 +52,7 @@ export function bookLook(b, theme) {
   let m1 = pal[i1] === color ? pal[(i1 + 1) % pal.length] : pal[i1];
   let m2 = pal[(i1 + 3) % pal.length];
   if (m2 === color) m2 = pal[(i1 + 4) % pal.length];
-  return { color, material, spineStyle, motif, mark, ink, m1, m2, light: luminance(color) > 0.42 };
+  return { color, material, spineStyle, motif, mark, ink, m1, m2, light: luminance(ink) < 0.2 };
 }
 
 /** Stable size factors (0..1) for height and thickness. */

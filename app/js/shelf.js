@@ -4,6 +4,7 @@ import { getTheme } from './themes.js';
 import { S, UNSORTED, visibleBooks, booksOnShelf, byOrder, bookArticles, bookUrl, bookStatus, STATUS_LABEL, imageUrl, saveBooks, saveShop, shelfExists } from './state.js';
 import { renderSpine, renderCover, bookDims, spineTitle, bookMeta, spineNeedsTwoCols } from './bookview.js';
 import { icon, logo, btn, anyModalOpen } from './ui.js';
+import { bookReadingTime, formatMinutes, CHARS_PER_MINUTE } from './readtime.js';
 
 export const view = { tab: 'all', query: '', selected: null, owner: false };
 
@@ -92,11 +93,11 @@ export function geometry(W, theme) {
   // Narrow screens: scale the shelf image uniformly (cropping the plain left/right edges)
   // so bays are taller; the image is never stretched, so book coordinates stay aligned.
   const zoom = W < 520 ? 1.5 : W < 700 ? 1.2 : 1;
-  const cropTop = W < 520 ? 0.1 : W < 820 ? 0.2 : 0.28;
+  const cropTop = W < 520 ? 0.12 : 0.32;
   const H = W * zoom * theme.imgH * (1 - cropTop) / theme.imgW;
   const baseIn = (theme.baseline - cropTop) / (1 - cropTop); // fraction from top of bay
   const rowBottom = H * (1 - baseIn);
-  const maxBookH = H * baseIn - H * 0.08 - (W < 520 ? 4 : 10);
+  const maxBookH = H * baseIn - H * 0.07 - (W < 520 ? 4 : 8);
   const rowW = W * 0.93;
   // plank front face (between the measured front edge and the bottom of the image)
   const plankTop = H * (theme.frontEdge - cropTop) / (1 - cropTop);
@@ -148,6 +149,7 @@ function layoutCase(theme) {
     }
   }
   caseEl.replaceChildren(frag);
+  if (view.selected) for (const el of caseEl.querySelectorAll(`.book[data-id="${CSS.escape(view.selected)}"]`)) el.classList.add('is-selected');
   bindBookEvents(caseEl);
 }
 
@@ -168,32 +170,53 @@ function bayEl(g, theme) {
   bay.style.height = g.H + 'px';
   bay.style.backgroundImage = `url("${theme.img}")`;
   bay.style.backgroundSize = `${g.zoom * 100}% auto`;
-  bay.style.containIntrinsicSize = `auto ${Math.round(g.H)}px`;
   return bay;
 }
 
+/** Gap placed before an item: spines lean together, covers / POP get an intended space. */
+export function itemGap(prev, it, g) {
+  if (!prev) return 0;
+  if (prev.kind === 'book' && prev.face === 'spine' && it.kind === 'book' && it.face === 'spine') return 1;
+  if (it.kind === 'pop') return 4; // a POP stands right next to its own book
+  return clamp(g.W * 0.022, 8, 18);
+}
 export function buildItems(books, g) {
   const items = [];
   for (const b of books) {
     const face = b.face === 'cover' ? 'cover' : 'spine';
     const size = face === 'cover' ? coverSize(g) : spineSize(b, g);
-    items.push({ kind: 'book', b, face, w: size.w + (face === 'cover' ? 8 : 0), size });
+    items.push({ kind: 'book', b, face, w: size.w + (face === 'cover' ? 6 : 0), size });
     if (b.pop && b.popOnShelf !== false && b.pop.length <= 40) {
-      const pw = clamp(g.W * 0.15, 86, 132);
-      items.push({ kind: 'pop', b, w: pw + 16, pw, ph: clamp(g.maxBookH * 0.5, 64, 120) });
+      const pw = clamp(g.W * 0.14, 80, 124);
+      items.push({ kind: 'pop', b, w: pw, pw, ph: clamp(g.maxBookH * 0.46, 60, 112) });
     }
   }
   return items;
 }
-/** Greedy packing into bays (one shelf PNG each). */
+export const bookendW = (g) => clamp(g.maxBookH * 0.05, 8, 12);
+/**
+ * Pack items into bays WITHOUT changing their saved order.
+ * A book and its POP stay together. When a shelf needs several bays, the items are
+ * balanced across them so the last bay is not left almost empty.
+ */
 export function packBays(items, g) {
-  const bays = [[]];
-  let used = 0;
-  const gap = 2;
+  const units = [];
   for (const it of items) {
-    if (used + it.w > g.rowW && bays[bays.length - 1].length) { bays.push([]); used = 0; }
-    bays[bays.length - 1].push(it);
-    used += it.w + gap;
+    if (it.kind === 'pop' && units.length) units[units.length - 1].push(it);
+    else units.push([it]);
+  }
+  const widthOf = (list) => list.reduce((n, it, i) => n + it.w + itemGap(list[i - 1], it, g), 0);
+  const room = g.rowW - bookendW(g) * 2 - 12;
+  const total = widthOf(items);
+  const k = Math.max(1, Math.ceil(total / room));
+  const target = total / k;
+  const bays = [[]];
+  for (const u of units) {
+    const cur = bays[bays.length - 1];
+    const next = widthOf([...cur, ...u]);
+    const over = next > room || (k > 1 && bays.length < k && widthOf(cur) >= target * 0.92 && next > target * 1.05);
+    if (cur.length && over) bays.push([...u]);
+    else cur.push(...u);
   }
   return bays;
 }
@@ -201,31 +224,41 @@ export function packBays(items, g) {
 function shelfGroup(shelf, books, g, theme, { empty, noDrag } = {}) {
   const group = h('section', { class: 'shelf-group', 'aria-label': shelf.name || '本棚' });
   const bays = packBays(buildItems(books, g), g);
-  const gap = 2;
+  const bw = bookendW(g);
   bays.forEach((list, i) => {
     const bay = bayEl(g, theme);
     if (i === 0 && shelf.name) bay.appendChild(shelfLabel(shelf.name, g));
     const row = h('div', { class: 'bay-row', 'data-shelf': shelf.id || '', 'data-nodrag': noDrag ? '1' : null });
     row.style.bottom = g.rowBottom + 'px';
-    let rowUsed = 0;
-    for (const it of list) {
+    let used = 0;
+    list.forEach((it, j) => { used += it.w + itemGap(list[j - 1], it, g); });
+    // a group that does not fill the bay is displayed centred between two bookends,
+    // so the shelf never looks empty on one side only
+    const leftover = g.rowW - used;
+    const ends = list.length && leftover > bw * 2 + 6;
+    const bookend = (side) => {
+      const be = h('span', { class: `bookend ${side}`, 'aria-hidden': 'true' });
+      be.style.height = clamp(g.maxBookH * 0.42, 34, 96) + 'px';
+      be.style.width = bw + 'px';
+      return be;
+    };
+    if (ends) { row.classList.add('centered'); row.appendChild(bookend('left')); }
+    list.forEach((it, j) => {
+      let el;
       if (it.kind === 'book') {
-        row.appendChild(it.face === 'cover' ? renderCover(it.b, theme, it.size) : renderSpine(it.b, theme, it.size));
+        el = it.face === 'cover' ? renderCover(it.b, theme, it.size) : renderSpine(it.b, theme, it.size);
       } else {
-        const pop = h('button', { type: 'button', class: `pop-mini${theme.pop === 'dark' ? ' dark' : ''}`, 'data-pop-for': it.b.id, 'aria-label': `POP：${it.b.pop}` }, it.b.pop);
-        pop.style.width = it.pw + 'px';
-        pop.style.height = it.ph + 'px';
-        pop.style.fontSize = clamp(it.pw / 9, 11, 14) + 'px';
-        row.appendChild(pop);
+        el = h('button', { type: 'button', class: `pop-mini${theme.pop === 'dark' ? ' dark' : ''}`, 'data-pop-for': it.b.id, 'aria-label': `POP：${it.b.pop}` },
+          h('span', { class: 'pop-card' }, it.b.pop), h('span', { class: 'pop-foot', 'aria-hidden': 'true' }));
+        el.style.width = it.pw + 'px';
+        el.style.height = it.ph + 'px';
+        el.style.fontSize = clamp(it.pw / 9, 11, 14) + 'px';
       }
-      rowUsed += it.w + gap;
-    }
-    if (list.length && g.rowW - rowUsed > 46) {
-      const be = h('span', { class: 'bookend', 'aria-hidden': 'true' });
-      be.style.height = clamp(g.maxBookH * 0.3, 22, 56) + 'px';
-      be.style.width = clamp(g.maxBookH * 0.3, 22, 56) * 1.1 + 'px';
-      row.appendChild(be);
-    }
+      const gap = itemGap(list[j - 1], it, g);
+      el.style.marginLeft = (j === 0 ? (ends ? 0 : 0) : gap) + 'px';
+      row.appendChild(el);
+    });
+    if (ends) row.appendChild(bookend('right'));
     bay.appendChild(row);
     if (!list.length) bay.appendChild(h('p', { class: 'bay-empty' }, empty || 'まだ本がありません'));
     group.appendChild(bay);
@@ -311,12 +344,18 @@ function renderPanel(theme) {
   if (b || (!wide && view.owner)) panel.appendChild(h('button', { class: 'icon-btn detail-close', type: 'button', 'aria-label': '閉じる', onclick: closeDetail }, icon('close')));
   if (!b) { panel.appendChild(ownerCard()); return panel; }
 
-  const cw = wide ? 210 : 170;
+  // 1. cover + title
+  const cw = wide ? 190 : 140;
   const cover = renderCover(b, theme, { w: cw, h: cw / 0.7, large: true, static: true });
   panel.appendChild(h('div', { class: 'detail-cover' }, cover));
   panel.appendChild(h('h2', null, b.title || '無題'));
+  // 2. series status, chapters, reading time (only from real body text)
   const arts = bookArticles(b);
+  const readable = ctx.canRead(b) ? arts.filter((a) => a.html) : [];
+  const rt = readable.length ? bookReadingTime(readable) : null;
   const chips = bookMeta(b).map((t) => h('li', { class: 'chip' }, t));
+  if (!arts.length && b.chapters && b.chapters.length > 1) chips.push(h('li', { class: 'chip' }, `全${b.chapters.length}話`));
+  if (rt && rt.total) chips.push(h('li', { class: 'chip', title: `本文の文字数から ${CHARS_PER_MINUTE}字/分 で計算した目安です` }, `読了目安 ${formatMinutes(rt.total)}`));
   if (arts[0] && arts[0].date) chips.push(h('li', { class: 'chip' }, formatDate(arts[0].date)));
   if (ctx.editing) {
     const st = bookStatus(b);
@@ -324,23 +363,32 @@ function renderPanel(theme) {
     if (b.shareBody) chips.push(h('li', { class: 'chip warn' }, '本文を共有'));
   }
   if (chips.length) panel.appendChild(h('ul', { class: 'meta' }, chips));
-  if (b.pop) {
-    panel.appendChild(h('h3', { class: 'section-title' }, '店主からひとこと'));
-    panel.appendChild(h('div', { class: 'pop' }, b.pop));
-  }
+  // 3. short introduction
   if (b.blurb) panel.appendChild(h('p', { class: 'blurb' }, b.blurb));
-  if (arts.length > 1) {
-    panel.appendChild(h('h3', { class: 'section-title' }, b.kind === 'anthology' ? '収録作品' : '目次'));
-    panel.appendChild(h('ol', { class: 'chapters' }, arts.map((a) => h('li', null, a.title || '（無題）'))));
-  } else if (b.chapters && b.chapters.length > 1) {
-    panel.appendChild(h('h3', { class: 'section-title' }, '目次'));
-    panel.appendChild(h('ol', { class: 'chapters' }, b.chapters.map((c) => h('li', null, c.url ? h('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, c.title) : c.title))));
+  // 4. for whom / owner's reason (only when filled in)
+  if (b.forWhom || b.pop) {
+    const notes = h('dl', { class: 'reco' });
+    if (b.forWhom) notes.append(h('dt', null, 'こんな人へ'), h('dd', { class: 'for-whom' }, b.forWhom));
+    if (b.pop) notes.append(h('dt', null, '店主のおすすめ理由'), h('dd', null, h('span', { class: 'pop small' }, b.pop)));
+    panel.appendChild(notes);
   }
+  // 5. main actions
   const actions = h('div', { class: 'detail-actions' });
-  if (ctx.canRead(b)) actions.appendChild(btn('この本を読む', () => ctx.onRead(b), { cls: 'primary', iconName: 'book' }));
+  if (readable.length) actions.appendChild(btn('この本を読む', () => ctx.onRead(b), { cls: 'primary', iconName: 'book' }));
   const url = bookUrl(b);
-  if (url) actions.appendChild(h('a', { class: `btn ${ctx.canRead(b) ? '' : 'primary'}`, href: url, target: '_blank', rel: 'noopener noreferrer' }, 'noteで読む', icon('ext')));
+  if (url) actions.appendChild(h('a', { class: `btn ${readable.length ? '' : 'primary'}`, href: url, target: '_blank', rel: 'noopener noreferrer' }, 'noteで読む', icon('ext')));
   if (actions.childNodes.length) panel.appendChild(actions);
+  // 6. table of contents: tap a chapter to open it directly
+  const toc = arts.length > 1 ? arts.map((a, i) => ({ title: a.title || '（無題）', url: a.url, read: !!(readable.includes(a)), min: rt ? rt.chapters[readable.indexOf(a)] || 0 : 0, id: a.id }))
+    : !arts.length && b.chapters && b.chapters.length > 1 ? b.chapters.map((c) => ({ title: c.title, url: c.url, read: false })) : null;
+  if (toc) {
+    panel.appendChild(h('h3', { class: 'section-title' }, b.kind === 'anthology' ? '収録作品' : '目次'));
+    panel.appendChild(h('ol', { class: 'chapters' }, toc.map((c) => h('li', null,
+      c.read
+        ? h('button', { type: 'button', class: 'ch-link', onclick: () => ctx.onRead(b, { startArticleId: c.id }) }, h('span', { class: 'ch-t' }, c.title), c.min ? h('span', { class: 'ch-m' }, formatMinutes(c.min)) : null)
+        : h('span', { class: 'ch-row' }, h('span', { class: 'ch-t' }, c.title),
+          c.url ? h('a', { class: 'ch-note', href: c.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `${c.title}をnoteで読む` }, 'noteで読む', icon('ext')) : null)))));
+  }
   if (ctx.editing && ctx.editTools) panel.appendChild(ctx.editTools(b));
   return panel;
 }

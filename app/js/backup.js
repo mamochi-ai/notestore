@@ -135,7 +135,7 @@ export async function readBackup(file) {
       shelfId: isId(b.shelfId) ? b.shelfId : UNSORTED, order: Number(b.order) || 0, face: b.face === 'cover' ? 'cover' : 'spine',
       hidden: !!b.hidden, mergedInto: isId(b.mergedInto) ? b.mergedInto : null,
       seriesStatus: ['ongoing', 'complete'].includes(b.seriesStatus) ? b.seriesStatus : null,
-      pop: str(b.pop, 200), popOnShelf: b.popOnShelf !== false, blurb: str(b.blurb, 1000), shareBody: !!b.shareBody,
+      pop: str(b.pop, 200), popOnShelf: b.popOnShelf !== false, blurb: str(b.blurb, 1000), forWhom: str(b.forWhom, 200), shareBody: !!b.shareBody,
       createdAt: str(b.createdAt, 40),
     });
     Object.assign(nb.design, {

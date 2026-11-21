@@ -511,7 +511,7 @@ export function openDesignEditor(book, ctx) {
       renderCover(d, theme, { w: 170, h: 243, static: true }));
     $$('.book', preview).forEach((el) => { el.setAttribute('tabindex', '-1'); el.setAttribute('aria-hidden', 'true'); });
   };
-  const tabsDef = [['cover', '表紙'], ['spine', '背表紙'], ['text', '文字'], ['color', '色と素材'], ['pop', 'POP・紹介'], ['read', '読み方・公開']];
+  const tabsDef = [['cover', '表紙'], ['spine', '背表紙'], ['text', '文字'], ['color', '色と素材'], ['pop', '紹介・おすすめ'], ['read', '読み方・公開']];
   let tab = 'cover';
   const panel = h('div');
   const tabs = h('div', { class: 'tabs', role: 'tablist' }, ...tabsDef.map(([k, l]) => {
@@ -661,13 +661,18 @@ export function openDesignEditor(book, ctx) {
       els.push(h('p', { class: 'hint' }, '色・高さ・厚みは本ごとに固定され、表示のたびに変わりません。厚みは演出で、実際の文字量とは関係ありません。'));
       els.push(btn('この本をテーマ標準に戻す', () => { Object.assign(D, { color: null, material: null, spineStyle: null, motif: null, titleColor: null }); update(); drawPanel(); }, { cls: 'small' }));
     } else if (tab === 'pop') {
-      const pop = h('textarea', { maxlength: '120', placeholder: '例：この記事から、全部始まりました。' }); pop.value = d.pop || '';
-      pop.addEventListener('input', () => { d.pop = pop.value; update(); });
-      const blurb = h('textarea', { maxlength: '400', placeholder: '本の紹介（任意）' }); blurb.value = d.blurb || '';
+      // 本の詳細に並ぶ順：短い紹介文 → こんな人へ → 店主のおすすめ理由（＝棚のPOP）。未入力の項目は表示されません。
+      const blurb = h('textarea', { maxlength: '400', rows: '3', placeholder: '例：iPadだけでアプリを作り始めた、最初の3か月の記録です。' }); blurb.value = d.blurb || '';
       blurb.addEventListener('input', () => { d.blurb = blurb.value; });
-      els.push(h('div', { class: 'field' }, h('label', null, '店主のPOP（120字まで）', pop), h('p', { class: 'hint' }, '未入力ならPOPは出しません。40字以内なら棚にも小さく立てられます。')));
+      const who = h('input', { type: 'text', class: 'text', maxlength: '80', placeholder: '例：作りたいものはあるけど、最初の一歩で止まっている人へ', value: d.forWhom || '' });
+      who.addEventListener('input', () => { d.forWhom = who.value; });
+      const pop = h('textarea', { maxlength: '120', rows: '2', placeholder: '例：うまくいかなかった話から読んでほしい一冊です' }); pop.value = d.pop || '';
+      pop.addEventListener('input', () => { d.pop = pop.value; update(); });
+      els.push(h('p', { class: 'hint' }, 'どれも任意です。入力した項目だけが本の詳細に表示されます。'));
+      els.push(h('div', { class: 'field' }, h('label', null, '短い紹介文（1〜3行がおすすめ）', blurb)));
+      els.push(h('div', { class: 'field' }, h('label', null, 'こんな人へ（80字まで）', who)));
+      els.push(h('div', { class: 'field' }, h('label', null, '店主のおすすめ理由（120字まで・棚のPOPにもなります）', pop), h('p', { class: 'hint' }, '以前の「店主のPOP」と同じ項目です。40字以内なら棚にも小さく立てられます。')));
       els.push(check('棚にもPOPを立てる（40字以内のとき）', () => d.popOnShelf !== false, (v) => { d.popOnShelf = v; }));
-      els.push(h('div', { class: 'field' }, h('label', null, '紹介文', blurb)));
     } else if (tab === 'read') {
       els.push(seg('表示モード', () => d.mode, (v) => { d.mode = v; }, [['post', '通常（記事）'], ['novel', '小説']]));
       els.push(seg('標準の書字方向', () => d.writing, (v) => { d.writing = v; }, [['horizontal', '横書き'], ['vertical', '縦書き']]));
@@ -709,6 +714,7 @@ export function openDesignEditor(book, ctx) {
       { label: 'キャンセル' },
       { label: '保存', primary: true, onClick: async () => {
         d.title = (d.title || '').trim() || '無題';
+        d.blurb = (d.blurb || '').trim(); d.forWhom = (d.forWhom || '').trim(); d.pop = (d.pop || '').trim();
         if (d.shareBody && bookStatus(d) !== 'publish') d.shareBody = false;
         const used = new Set([d.design.coverImageId, d.design.spineImageId]);
         const images = [...pending.values()].filter((r) => used.has(r.id));

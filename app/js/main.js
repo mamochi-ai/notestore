@@ -105,7 +105,7 @@ export function showShop() {
     headerActions,
     footer,
     canRead,
-    onRead: (b) => openReader(b, { persist: S.mode === 'local' }),
+    onRead: (b, opts = {}) => openReader(b, opts),
     editTools: editing ? (b) => editor.bookTools(b, ctxApi) : null,
   });
 }

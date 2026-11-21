@@ -78,7 +78,7 @@ export function buildPublicModel({ ids, bodyIds = new Set(), pop = true, blurb =
       shelfId: shop.shelves.some((x) => x.id === b.shelfId) ? b.shelfId : UNSORTED, order: b.order, face: b.face,
       seriesStatus: b.seriesStatus || null, url: bookUrl(b),
       chapters: arts.length > 1 ? arts.map((a) => ({ title: a.title, url: a.url || null })) : [],
-      pop: pop ? b.pop || '' : '', popOnShelf: b.popOnShelf !== false, blurb: blurb ? b.blurb || '' : '',
+      pop: pop ? b.pop || '' : '', popOnShelf: b.popOnShelf !== false, blurb: blurb ? b.blurb || '' : '', forWhom: blurb ? b.forWhom || '' : '',
       design: {
         color: d.color || null,
         material: d.material || null, motif: d.motif || null, spineStyle: d.spineStyle || null,
@@ -119,7 +119,7 @@ function previewList(model, { link }) {
     h('ul', { style: 'margin:6px 0 0;padding-left:1.2em;line-height:1.8;font-size:14px' },
       h('li', null, `店名「${model.shop.name}」・テーマ「${getTheme(model.shop.theme).name}」・店主名「${model.shop.owner || '（なし）'}」`),
       h('li', null, `自己紹介：${model.shop.intro ? 'あり' : 'なし'}／プロフィールURL：${model.shop.profileUrl || 'なし'}`),
-      h('li', null, `本 ${model.books.length}冊（タイトル・noteのURL${model.books.some((b) => b.pop) ? '・POP' : ''}${model.books.some((b) => b.blurb) ? '・紹介文' : ''}）`),
+      h('li', null, `本 ${model.books.length}冊（タイトル・noteのURL${model.books.some((b) => b.pop) ? '・POP' : ''}${model.books.some((b) => b.blurb) ? '・紹介文' : ''}${model.books.some((b) => b.forWhom) ? '・こんな人へ' : ''}）`),
       link ? h('li', null, '画像：含まれません（自分で登録した表紙・背表紙画像は相手には届かず、文字の表紙で表示されます）')
         : h('li', null, `画像：${model.images.size}枚`),
       h('li', null, withBody.length ? `本文：${withBody.map((b) => `「${b.title}」`).join('、')} の本文を含みます` : '本文：含まれません')),
@@ -157,6 +157,7 @@ export function encodeLink(model) {
       if (b.seriesStatus) o.st = b.seriesStatus === 'ongoing' ? 'o' : 'c';
       if (b.pop) { o.p = b.pop; if (!b.popOnShelf) o.ps = 0; }
       if (b.blurb) o.d = b.blurb;
+      if (b.forWhom) o.w = b.forWhom;
       const d = b.design;
       if (d.color) o.cl = d.color.slice(1);
       if (d.motif) o.m = d.motif;
@@ -209,7 +210,7 @@ export async function readShareFromHash(str) {
       order: idx, face: o.f === 1 ? 'cover' : 'spine',
       kind: o.k === 's' ? 'serial' : o.k === 'a' ? 'anthology' : 'single',
       seriesStatus: o.st === 'o' ? 'ongoing' : o.st === 'c' ? 'complete' : null,
-      pop: sstr(o.p, 200), popOnShelf: o.ps !== 0, blurb: sstr(o.d, 800), status: 'publish',
+      pop: sstr(o.p, 200), popOnShelf: o.ps !== 0, blurb: sstr(o.d, 800), forWhom: sstr(o.w, 200), status: 'publish',
     });
     b.chapters = (Array.isArray(o.c) ? o.c : []).slice(0, 300).map((c) => Array.isArray(c) ? { title: sstr(c[0], 200), url: isNoteUrl(c[1]) ? safeHttpUrl(c[1]) : null } : null).filter(Boolean);
     Object.assign(b.design, {
@@ -245,7 +246,7 @@ function openLinkShare() {
   const opt = (label, key) => { const cb = h('input', { type: 'checkbox', checked: opts[key] || null }); cb.addEventListener('change', () => { opts[key] = cb.checked; update(); }); return h('label', { class: 'check' }, cb, h('span', null, label)); };
   const body = h('div', null,
     h('p', { class: 'hint' }, '選んだ本のタイトルとnoteのURLなど、軽いデータだけを圧縮してURLの「#」以降に入れます。データはサーバーに送られません。本文・画像は入りません。本屋を更新したら、リンクを作り直してください。'),
-    opt('POPを含める', 'pop'), opt('紹介文を含める', 'blurb'), opt('自己紹介を含める', 'intro'),
+    opt('POPを含める', 'pop'), opt('紹介文・「こんな人へ」を含める', 'blurb'), opt('自己紹介を含める', 'intro'),
     h('h3', null, '共有する本'), bookSelector(state), prev, result);
   update();
   const m = openModal({
@@ -280,7 +281,7 @@ function openLinkShare() {
 // ======================= C. publish ZIP =======================
 const APP_FILES = [
   'app/css/app.css',
-  ...['main', 'util', 'themes', 'db', 'state', 'shelf', 'bookview', 'ui', 'sample', 'editor', 'reader', 'share', 'import-ui', 'importer', 'sanitize', 'images', 'zipsafe', 'organize', 'backup'].map((n) => `app/js/${n}.js`),
+  ...['main', 'util', 'themes', 'db', 'state', 'shelf', 'bookview', 'ui', 'sample', 'editor', 'reader', 'share', 'import-ui', 'importer', 'sanitize', 'images', 'zipsafe', 'organize', 'backup', 'readtime'].map((n) => `app/js/${n}.js`),
   'app/vendor/fflate.js', 'app/vendor/fflate.LICENSE',
   'assets/ui/bookend.svg', 'assets/ui/pop-dark.svg', 'assets/ui/pop-paper.svg', 'assets/ui/shelf-label.svg', 'assets/ui/icon.svg', 'assets/ui/icon-180.png',
 ];
@@ -300,7 +301,7 @@ function openPublishZip() {
   const opt = (label, key) => { const cb = h('input', { type: 'checkbox', checked: opts[key] || null }); cb.addEventListener('change', () => { opts[key] = cb.checked; update(); }); return h('label', { class: 'check' }, cb, h('span', null, label)); };
   const body = h('div', null,
     h('p', { class: 'hint' }, '選んだ本と画像、閲覧用ページをひとつのZIPにします。ZIPの中身をGitHub Pagesなどの静的ホスティングに置くと、画像込みの本屋として公開できます（置く作業は別途必要です）。編集用データや選ばなかった本・下書きは入りません。'),
-    opt('POPを含める', 'pop'), opt('紹介文を含める', 'blurb'), opt('自己紹介・プロフィール画像を含める', 'intro'),
+    opt('POPを含める', 'pop'), opt('紹介文・「こんな人へ」を含める', 'blurb'), opt('自己紹介・プロフィール画像を含める', 'intro'),
     h('p', { class: 'note-box warn' }, '「本文も公開する」は最初はすべてオフです。noteの書き出しには有料部分の境界が含まれないため、有料記事の本文は含めないでください。'),
     h('h3', null, '公開する本'), bookSelector(state, { withBody: true }), prev, confirmWrap);
   update();
@@ -389,7 +390,7 @@ export async function loadPublishedData() {
       writing: o.writing === 'vertical' ? 'vertical' : 'horizontal', shelfId: shelves.some((s) => s.id === o.shelfId) ? o.shelfId : UNSORTED,
       order: Number(o.order) || idx, face: o.face === 'cover' ? 'cover' : 'spine',
       seriesStatus: ['ongoing', 'complete'].includes(o.seriesStatus) ? o.seriesStatus : null,
-      url: isNoteUrl(o.url) ? safeHttpUrl(o.url) : null, pop: sstr(o.pop, 200), popOnShelf: o.popOnShelf !== false, blurb: sstr(o.blurb, 1000),
+      url: isNoteUrl(o.url) ? safeHttpUrl(o.url) : null, pop: sstr(o.pop, 200), popOnShelf: o.popOnShelf !== false, blurb: sstr(o.blurb, 1000), forWhom: sstr(o.forWhom, 200),
       shareBody: Array.isArray(o.body) && o.body.length > 0,
     });
     b.chapters = (Array.isArray(o.chapters) ? o.chapters : []).slice(0, 500).map((c) => ({ title: sstr(c && c.title, 200), url: isNoteUrl(c && c.url) ? safeHttpUrl(c.url) : null }));
