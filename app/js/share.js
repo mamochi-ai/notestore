@@ -10,6 +10,7 @@ import { S, UNSORTED, visibleBooks, booksOnShelf, bookArticles, bookUrl, bookSta
 import { geometry, buildItems, packBays, orderedShelves, coverSize } from './shelf.js';
 import { bookLook, spineTitle, coverTitle, spineFit, motifSvg, coverLayout, MOTIFS } from './bookview.js';
 import { sanitizeHtml } from './sanitize.js';
+import { splitHtml, markFor, hasPaid } from './paywall.js';
 import { extFor } from './images.js';
 
 export const LINK_MAX = 8000; // conservative total URL length (verified in Chromium; iOS Safari not yet verified on device)
@@ -76,7 +77,7 @@ export function buildPublicModel({ ids, bodyIds = new Set(), pop = true, blurb =
     const out = {
       id: b.id, title: b.title, spineTitle: b.spineTitle || null, kind: b.kind, mode: b.mode, writing: b.writing,
       shelfId: shop.shelves.some((x) => x.id === b.shelfId) ? b.shelfId : UNSORTED, order: b.order, face: b.face,
-      seriesStatus: b.seriesStatus || null, url: bookUrl(b),
+      seriesStatus: b.seriesStatus || null, url: bookUrl(b), paidNote: hasPaid(b),
       chapters: arts.length > 1 ? arts.map((a) => ({ title: a.title, url: a.url || null })) : [],
       pop: pop ? b.pop || '' : '', popOnShelf: b.popOnShelf !== false, blurb: blurb ? b.blurb || '' : '', forWhom: blurb ? b.forWhom || '' : '',
       design: {
@@ -92,9 +93,10 @@ export function buildPublicModel({ ids, bodyIds = new Set(), pop = true, blurb =
     if (bodyIds.has(b.id) && eligible(b)) {
       out.body = arts.map((a) => {
         const t = document.createElement('template');
-        t.innerHTML = a.html || '';
+        const sp = splitHtml(a.html || '', markFor(b, a.id));
+        t.innerHTML = sp.free; // the paid part is never included
         for (const img of $$('img[data-img]', t.content)) { if (!addImg(img.getAttribute('data-img'))) img.removeAttribute('data-img'); }
-        return { title: a.title, url: a.url || null, html: t.innerHTML };
+        return { title: a.title, url: a.url || null, html: t.innerHTML, ...(sp.cut ? { paidCut: true } : {}) };
       });
     }
     return out;
@@ -122,7 +124,8 @@ function previewList(model, { link }) {
       h('li', null, `本 ${model.books.length}冊（タイトル・noteのURL${model.books.some((b) => b.pop) ? '・POP' : ''}${model.books.some((b) => b.blurb) ? '・紹介文' : ''}${model.books.some((b) => b.forWhom) ? '・こんな人へ' : ''}）`),
       link ? h('li', null, '画像：含まれません（自分で登録した表紙・背表紙画像は相手には届かず、文字の表紙で表示されます）')
         : h('li', null, `画像：${model.images.size}枚`),
-      h('li', null, withBody.length ? `本文：${withBody.map((b) => `「${b.title}」`).join('、')} の本文を含みます` : '本文：含まれません')),
+      h('li', null, withBody.length ? `本文：${withBody.map((b) => `「${b.title}」`).join('、')} の本文を含みます` : '本文：含まれません'),
+      withBody.some((b) => b.body.some((c) => c.paidCut)) ? h('li', null, `有料部分：${withBody.filter((b) => b.body.some((c) => c.paidCut)).map((b) => `「${b.title}」`).join('、')} は有料部分の手前までです`) : null),
     h('p', { class: 'hint', style: 'margin:6px 0 0' }, `含まれる本：${model.books.map((b) => b.title).join(' ／ ') || 'なし'}`));
 }
 
@@ -158,6 +161,7 @@ export function encodeLink(model) {
       if (b.pop) { o.p = b.pop; if (!b.popOnShelf) o.ps = 0; }
       if (b.blurb) o.d = b.blurb;
       if (b.forWhom) o.w = b.forWhom;
+      if (b.paidNote) o.pd = 1;
       const d = b.design;
       if (d.color) o.cl = d.color.slice(1);
       if (d.motif) o.m = d.motif;
@@ -210,7 +214,7 @@ export async function readShareFromHash(str) {
       order: idx, face: o.f === 1 ? 'cover' : 'spine',
       kind: o.k === 's' ? 'serial' : o.k === 'a' ? 'anthology' : 'single',
       seriesStatus: o.st === 'o' ? 'ongoing' : o.st === 'c' ? 'complete' : null,
-      pop: sstr(o.p, 200), popOnShelf: o.ps !== 0, blurb: sstr(o.d, 800), forWhom: sstr(o.w, 200), status: 'publish',
+      pop: sstr(o.p, 200), popOnShelf: o.ps !== 0, blurb: sstr(o.d, 800), forWhom: sstr(o.w, 200), paidNote: o.pd === 1, status: 'publish',
     });
     b.chapters = (Array.isArray(o.c) ? o.c : []).slice(0, 300).map((c) => Array.isArray(c) ? { title: sstr(c[0], 200), url: isNoteUrl(c[1]) ? safeHttpUrl(c[1]) : null } : null).filter(Boolean);
     Object.assign(b.design, {
@@ -281,7 +285,7 @@ function openLinkShare() {
 // ======================= C. publish ZIP =======================
 const APP_FILES = [
   'app/css/app.css',
-  ...['main', 'util', 'themes', 'db', 'state', 'shelf', 'bookview', 'ui', 'sample', 'editor', 'reader', 'share', 'import-ui', 'importer', 'sanitize', 'images', 'zipsafe', 'organize', 'backup', 'readtime'].map((n) => `app/js/${n}.js`),
+  ...['main', 'util', 'themes', 'db', 'state', 'shelf', 'bookview', 'ui', 'sample', 'editor', 'reader', 'share', 'import-ui', 'importer', 'sanitize', 'images', 'zipsafe', 'organize', 'backup', 'readtime', 'paywall'].map((n) => `app/js/${n}.js`),
   'app/vendor/fflate.js', 'app/vendor/fflate.LICENSE',
   'assets/ui/bookend.svg', 'assets/ui/pop-dark.svg', 'assets/ui/pop-paper.svg', 'assets/ui/shelf-label.svg', 'assets/ui/icon.svg', 'assets/ui/icon-180.png',
 ];
@@ -390,7 +394,7 @@ export async function loadPublishedData() {
       writing: o.writing === 'vertical' ? 'vertical' : 'horizontal', shelfId: shelves.some((s) => s.id === o.shelfId) ? o.shelfId : UNSORTED,
       order: Number(o.order) || idx, face: o.face === 'cover' ? 'cover' : 'spine',
       seriesStatus: ['ongoing', 'complete'].includes(o.seriesStatus) ? o.seriesStatus : null,
-      url: isNoteUrl(o.url) ? safeHttpUrl(o.url) : null, pop: sstr(o.pop, 200), popOnShelf: o.popOnShelf !== false, blurb: sstr(o.blurb, 1000), forWhom: sstr(o.forWhom, 200),
+      url: isNoteUrl(o.url) ? safeHttpUrl(o.url) : null, pop: sstr(o.pop, 200), popOnShelf: o.popOnShelf !== false, blurb: sstr(o.blurb, 1000), forWhom: sstr(o.forWhom, 200), paidNote: o.paidNote === true,
       shareBody: Array.isArray(o.body) && o.body.length > 0,
     });
     b.chapters = (Array.isArray(o.chapters) ? o.chapters : []).slice(0, 500).map((c) => ({ title: sstr(c && c.title, 200), url: isNoteUrl(c && c.url) ? safeHttpUrl(c.url) : null }));
@@ -405,7 +409,7 @@ export async function loadPublishedData() {
     if (b.shareBody) {
       b.articleIds = o.body.slice(0, 500).map((c, i) => {
         const aid = `${id}_c${i}`;
-        articles.push({ id: aid, title: sstr(c && c.title, 300), url: isNoteUrl(c && c.url) ? safeHttpUrl(c.url) : null, status: 'publish', html: sanitizeHtml(sstr(c && c.html, 5_000_000), { knownImage: (x) => known.has(x) }).html });
+        articles.push({ id: aid, title: sstr(c && c.title, 300), url: isNoteUrl(c && c.url) ? safeHttpUrl(c.url) : null, status: 'publish', paidCut: !!(c && c.paidCut), html: sanitizeHtml(sstr(c && c.html, 5_000_000), { knownImage: (x) => known.has(x) }).html });
         return aid;
       });
     }

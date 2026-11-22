@@ -38,6 +38,7 @@ async function newPage(vp = { width: 1024, height: 768 }, ctxOpts = {}) {
 const S = (page, fn, arg) => page.evaluate(`(async () => { const st = await import('/app/js/state.js'); return (${fn.toString()})(st, ${JSON.stringify(arg ?? null)}); })()`);
 
 async function importFile(page, file, { select = 'default', suggestions = 'skip', theme = null } = {}) {
+  await page.waitForSelector('.welcome, .editbar');
   if (await page.locator('.welcome').count()) {
     await page.locator('.welcome input[type=file]').setInputFiles(file);
   } else {
@@ -203,6 +204,7 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
 
   await test('バックアップ書き出し→全削除→別環境で復元', async () => {
     const page = shop;
+    await page.evaluate(async () => { const st = await import('/app/js/state.js'); const b = [...st.S.books.values()].find((x) => !x.hidden); b.paywall = { [b.articleIds[0]]: { at: 1, text: '' } }; await st.saveBooks([b]); });
     const counts = await S(page, (st) => ({ b: st.S.books.size, a: st.S.articles.size, i: st.S.images.size, theme: st.S.shop.theme }));
     await page.locator('.editbar button', { hasText: 'お店の設定' }).click();
     const [dl] = await Promise.all([page.waitForEvent('download'), page.locator('.modal button', { hasText: 'バックアップを書き出す' }).click()]);
@@ -220,6 +222,8 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     const c2 = await S(p2, (st) => ({ b: st.S.books.size, a: st.S.articles.size, i: st.S.images.size, theme: st.S.shop.theme }));
     const fw = await S(p2, (st) => [...st.S.books.values()].some((b) => b.forWhom === '最初の一歩で止まっている人へ'));
     assert(fw, 'forWhom lost in backup/restore');
+    const pw = await S(p2, (st) => [...st.S.books.values()].some((b) => b.paywall && Object.values(b.paywall).some((v) => v.at === 1)));
+    assert(pw, 'paywall lost in backup/restore');
     assert(JSON.stringify(c2) === JSON.stringify(counts), `mismatch ${JSON.stringify(counts)} vs ${JSON.stringify(c2)}`);
     const imgOk = await p2.locator('.book .book-art').first().evaluate((i) => new Promise((r) => (i.complete ? r(i.naturalWidth > 0) : (i.onload = () => r(i.naturalWidth > 0)))));
     assert(imgOk, 'restored image not displayed');
@@ -540,6 +544,40 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     assert(!(await page.locator('.detail .reco').count()), 'empty forWhom shown');
     await ctx.close();
     return chips.replace(/\n/g, ' ');
+  });
+
+  await test('縦書きの英数字・有料部分の境界（表示・公開用データから除外・バックアップで保持）', async () => {
+    const { ctx, page } = await newPage({ width: 390, height: 844 });
+    await page.goto(BASE);
+    await page.getByText('サンプルの本屋を見る').click();
+    await page.evaluate(async () => {
+      const st = await import('/app/js/state.js'); const r = await import('/app/js/reader.js');
+      st.S.articles.get('s8').html = '<p>2024年8月に300円、9月、AIとLINE、mofusandが2.8倍。かわいい!本当!?</p><p>無料の最後</p><p>ここから有料の本文PAIDTEXT</p>';
+      const b = st.S.books.get('bk8'); b.writing = 'vertical'; b.paywall = { s8: { at: 2, text: 'ここから有料の本文PAIDTEXT' } };
+      localStorage.clear(); r.openReader(b, { startChapter: 0 });
+    });
+    await page.waitForSelector('.reading-paper.vertical');
+    const tc = await page.evaluate(() => ({ tcy: [...document.querySelectorAll('.reading-paper .tcy')].map((e) => e.textContent), upr: [...document.querySelectorAll('.reading-paper .upr')].map((e) => e.textContent) }));
+    for (const x of ['8', '9', 'AI', '!?']) assert(tc.tcy.includes(x), 'tcy missing ' + x + JSON.stringify(tc));
+    for (const x of ['2024', '300', 'LINE', '2.8', '!']) assert(tc.upr.includes(x), 'upright missing ' + x + JSON.stringify(tc));
+    assert(![...tc.tcy, ...tc.upr].includes('mofusand'), 'english word should stay sideways');
+    const markBefore = await page.evaluate(() => { const m = document.querySelector('.paywall-mark'); return m && m.nextElementSibling && m.nextElementSibling.textContent; });
+    assert(markBefore && markBefore.includes('PAIDTEXT'), 'paywall marker position');
+    // sideways option keeps text as-is
+    await page.locator('.reader .tool[aria-label="表示の設定"]').click();
+    await page.locator('.reader-pop button', { hasText: '横に寝かせる' }).click();
+    assert((await page.locator('.reading-paper .upr').count()) === 0, 'sideways option');
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+    // public model: paid part removed, flagged
+    const m = await page.evaluate(async () => {
+      const s = await import('/app/js/share.js'); const st = await import('/app/js/state.js');
+      for (const a of st.S.articles.values()) { a.status = 'publish'; a.url = 'https://note.com/x/n/' + a.id; }
+      const model = s.buildPublicModel({ ids: new Set(['bk8']), bodyIds: new Set(['bk8']) });
+      return JSON.stringify(model.books[0]);
+    });
+    assert(!m.includes('PAIDTEXT') && m.includes('"paidCut":true') && m.includes('無料の最後') && m.includes('"paidNote":true'), 'paid part in public data: ' + m.slice(0, 300));
+    await ctx.close();
+    return `tcy ${tc.tcy.join(',')} / upright ${tc.upr.join(',')}`;
   });
 
   // ---------- published ZIP ----------

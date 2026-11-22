@@ -14,6 +14,7 @@ import { startImport } from './import-ui.js';
 import { exportBackup, openRestore } from './backup.js';
 import { storageInfo } from './db.js';
 import { uid } from './util.js';
+import { listBlocks, locate } from './paywall.js';
 
 const rerender = () => render();
 
@@ -677,6 +678,23 @@ export function openDesignEditor(book, ctx) {
       els.push(seg('表示モード', () => d.mode, (v) => { d.mode = v; }, [['post', '通常（記事）'], ['novel', '小説']]));
       els.push(seg('標準の書字方向', () => d.writing, (v) => { d.writing = v; }, [['horizontal', '横書き'], ['vertical', '縦書き']]));
       if (d.kind !== 'single') els.push(seg('連載の状態', () => d.seriesStatus || null, (v) => { d.seriesStatus = v; }, [[null, '表示しない'], ['ongoing', '連載中'], ['complete', '完結']]));
+      // paid section boundary (note's export doesn't contain it → the owner marks it)
+      if (!d.paywall) d.paywall = {};
+      els.push(h('h3', null, '有料部分'));
+      els.push(h('p', { class: 'hint' }, 'noteの書き出しには「ここから有料」の位置が含まれません。有料にしている記事は、有料部分が始まる段落を選んでください。読書画面に境界線が出て、公開用ZIPには境界より前だけが入ります。★は「有料」「この先」などの言葉を含む段落です（目安で、自動では設定しません）。'));
+      for (const [i, a] of bookArticles(d).entries()) {
+        const blocks = listBlocks(a.html);
+        const cur = locate(a.html, d.paywall[a.id]);
+        const sel = h('select', { class: 'text', 'aria-label': `${a.title || '無題'}の有料部分の開始位置` },
+          h('option', { value: '-1' }, '有料部分なし（無料の記事）'),
+          ...blocks.map((bk) => h('option', { value: String(bk.i), selected: bk.i === cur || null }, `${bk.hint ? '★ ' : ''}ここから有料：${bk.i + 1}. ${bk.text}`)));
+        sel.addEventListener('change', () => {
+          const v = parseInt(sel.value, 10);
+          if (v < 0) delete d.paywall[a.id];
+          else d.paywall[a.id] = { at: v, text: blocks[v].text === '（空の段落）' ? '' : blocks[v].text };
+        });
+        els.push(h('div', { class: 'field' }, h('label', null, bookArticles(d).length > 1 ? `${i + 1}章：${a.title || '無題'}` : (a.title || '本文'), sel)));
+      }
       const st = bookStatus(d);
       els.push(h('h3', null, '本文の公開'));
       els.push(h('p', { class: 'hint' }, `状態：${STATUS_LABEL[st] || st}。本文を共有するのは「画像込みの公開用ZIP」だけです。紹介リンクには本文は入りません。`));
@@ -685,7 +703,7 @@ export function openDesignEditor(book, ctx) {
       cb.addEventListener('change', () => { d.shareBody = cb.checked; });
       els.push(h('label', { class: 'check' }, cb, h('span', null, 'この本の本文を、公開用ZIPで読めるようにする')));
       els.push(h('p', { class: 'note-box warn' }, canShare
-        ? 'noteの書き出しには有料部分の境界や価格が含まれません。有料記事の場合、有料部分まで公開されてしまいます。公開してよい本文か、ご自身で確認してください。'
+        ? '有料部分を指定した章は、境界より前だけが公開用ZIPに入ります。有料記事なのに境界を指定していないと、有料部分まで公開されてしまいます。公開してよい本文か、ご自身で確認してください。'
         : '下書き・予約・状態が分からない記事を含む本は、本文を公開できません。'));
     }
     panel.replaceChildren(...els);

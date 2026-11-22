@@ -5,6 +5,7 @@ import { S, UNSORTED, visibleBooks, booksOnShelf, byOrder, bookArticles, bookUrl
 import { renderSpine, renderCover, bookDims, spineTitle, bookMeta, spineNeedsTwoCols } from './bookview.js';
 import { icon, logo, btn, anyModalOpen } from './ui.js';
 import { bookReadingTime, formatMinutes, CHARS_PER_MINUTE } from './readtime.js';
+import { hasPaid } from './paywall.js';
 
 export const view = { tab: 'all', query: '', selected: null, owner: false };
 
@@ -355,6 +356,7 @@ function renderPanel(theme) {
   const rt = readable.length ? bookReadingTime(readable) : null;
   const chips = bookMeta(b).map((t) => h('li', { class: 'chip' }, t));
   if (!arts.length && b.chapters && b.chapters.length > 1) chips.push(h('li', { class: 'chip' }, `全${b.chapters.length}話`));
+  if (hasPaid(b) || b.paidNote || arts.some((a) => a.paidCut)) chips.push(h('li', { class: 'chip', title: 'noteでは一部が有料の記事です' }, '一部有料'));
   if (rt && rt.total) chips.push(h('li', { class: 'chip', title: `本文の文字数から ${CHARS_PER_MINUTE}字/分 で計算した目安です` }, `読了目安 ${formatMinutes(rt.total)}`));
   if (arts[0] && arts[0].date) chips.push(h('li', { class: 'chip' }, formatDate(arts[0].date)));
   if (ctx.editing) {

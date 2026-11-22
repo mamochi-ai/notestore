@@ -3,12 +3,13 @@
 import { h, debounce, toast, $, $$ } from './util.js';
 import { icon, trapTab } from './ui.js';
 import { S, bookArticles, bookUrl, imageUrl } from './state.js';
+import { locate, markFor } from './paywall.js';
 
 const PREF_KEY = 'bookshop:reader';
 function prefs() {
   try { return { fs: 18, lh: 1.95, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') }; } catch { return { fs: 18, lh: 1.95 }; }
 }
-function savePrefs(p) { try { localStorage.setItem(PREF_KEY, JSON.stringify({ fs: p.fs, lh: p.lh })); } catch { /* private mode */ } }
+function savePrefs(p) { try { localStorage.setItem(PREF_KEY, JSON.stringify({ fs: p.fs, lh: p.lh, latin: p.latin })); } catch { /* private mode */ } }
 const posKey = (b) => `bookshop:pos:${S.source}:${b.id}`;
 const markKey = (b) => `bookshop:mark:${S.source}:${b.id}`;
 const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
@@ -21,7 +22,7 @@ export function openReader(book, { startChapter = null, startArticleId = null } 
   const p = prefs();
   const st = {
     ch: 0, writing: book.writing === 'vertical' ? 'vertical' : 'horizontal', media: true,
-    fs: p.fs, lh: p.lh,
+    fs: p.fs, lh: p.lh, latin: p.latin === 'sideways' ? 'sideways' : 'tidy',
   };
   const last = lsGet(posKey(book));
   if (startArticleId != null) { const i = arts.findIndex((a) => a.id === startArticleId); if (i >= 0) startChapter = i; }
@@ -90,14 +91,14 @@ export function openReader(book, { startChapter = null, startArticleId = null } 
     title.textContent = arts.length > 1 ? `${book.title}　${st.ch + 1}. ${a.title || ''}` : book.title;
     const chapter = h('div', { class: 'chapter' });
     chapter.appendChild(h('h1', { class: 'ch-title' }, arts.length > 1 ? (a.title || `第${st.ch + 1}章`) : (book.title || a.title)));
-    chapter.appendChild(buildBody(a.html));
+    chapter.appendChild(buildBody(a));
     const end = h('div', { class: 'chapter-end' });
     if (st.ch < arts.length - 1) end.appendChild(h('button', { type: 'button', class: 'btn primary', onclick: () => go(1) }, '次の章へ', icon('right')));
     else end.appendChild(h('span', null, '— おわり —'));
     const url = a.url || (st.ch === 0 ? bookUrl(book) : null);
     if (url) end.appendChild(h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener noreferrer' }, 'noteで読む', icon('ext')));
     chapter.appendChild(end);
-    if (st.writing === 'vertical') applyTcy(chapter);
+    if (st.writing === 'vertical' && st.latin === 'tidy') tidyVertical(chapter);
     paper.replaceChildren(chapter);
     prevBtn.disabled = st.ch === 0;
     nextBtn.disabled = st.ch >= arts.length - 1;
@@ -123,9 +124,21 @@ export function openReader(book, { startChapter = null, startArticleId = null } 
     paper.style.width = Math.max(minW, Math.min(maxW, need)) + 'px';
   }
 
-  function buildBody(html) {
+  function buildBody(a) {
+    const html = a.html;
     const t = document.createElement('template');
     t.innerHTML = html || ''; // already sanitized at import / load time
+    // paid section: the owner sees a clear divider; published copies are already cut before this point
+    const at = locate(html, markFor(book, a.id));
+    if (at >= 0) {
+      const target = t.content.children[at];
+      if (target) target.before(h('div', { class: 'paywall-mark', role: 'note' }, h('span', null, 'ここから先は有料部分です'), h('small', null, 'noteでは有料で公開している内容です（あなたの端末でだけ表示されています）')));
+    }
+    if (a.paidCut) {
+      const url = a.url || bookUrl(book);
+      t.content.appendChild(h('div', { class: 'paywall-mark end', role: 'note' }, h('span', null, 'この先は有料部分です'),
+        url ? h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener noreferrer' }, '続きをnoteで読む', icon('ext')) : h('small', null, '続きはnoteでお読みください')));
+    }
     for (const img of $$('img', t.content)) {
       const id = img.getAttribute('data-img');
       const url = id ? imageUrl(id) : null;
@@ -176,6 +189,8 @@ export function openReader(book, { startChapter = null, startArticleId = null } 
       h('h3', null, '書字方向'), seg([['vertical', '縦書き'], ['horizontal', '横書き']], () => st.writing, (v) => { st.writing = v; }),
       h('h3', null, '文字の大きさ'), seg([[15, '小'], [18, '中'], [21, '大'], [25, '特大']], () => st.fs, (v) => { st.fs = v; }),
       h('h3', null, '行間'), seg([[1.7, '狭い'], [1.95, 'ふつう'], [2.3, '広い']], () => st.lh, (v) => { st.lh = v; }),
+      st.writing === 'vertical' ? h('div', null, h('h3', null, '縦書きの英数字'), seg([['tidy', '縦向きに整える'], ['sideways', '横に寝かせる']], () => st.latin, (v) => { st.latin = v; }),
+        h('p', { class: 'hint' }, '整える：2桁までの数字・2文字までの大文字（AIなど）は1文字分に横並び、3桁以上の数字と短い大文字語は1字ずつ縦に。英単語は横に寝かせます。')) : null,
       st.writing === 'vertical' ? h('div', null, h('h3', null, '縦書きの画像・表'), seg([[true, '表示する'], [false, '隠す']], () => st.media, (v) => { st.media = v; }), h('p', { class: 'hint' }, '画像や表が多い記事は、横書きにすると読みやすくなります。')) : null), '表示の設定');
   });
   markBtn.addEventListener('click', () => {
@@ -225,25 +240,46 @@ export function openReader(book, { startChapter = null, startArticleId = null } 
   return { close, el, state: st, setRatio, ratio };
 }
 
-/** Wrap 1–2 digit numbers (and !? pairs) for tate-chu-yoko in vertical text. */
-function applyTcy(root) {
+/**
+ * Vertical typesetting of half-width alphanumerics, following common Japanese vertical-text practice:
+ *  - numbers of 1–2 digits, 1–2 capital letters (AI, OK) and "!?"/"!!" → tate-chu-yoko (one cell)
+ *  - numbers of 3+ digits (incl. 2,024 / 2.8) and 3–4 capital letters (LINE) → each character upright
+ *  - single "!" "?" → upright
+ *  - ordinary words (mofusand, English) stay rotated sideways, as in printed books
+ * The text itself is never changed (no conversion to kanji numerals).
+ */
+function tidyVertical(root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => (n.parentElement && n.parentElement.closest('figure,table,pre,code,a,.h-island,rt') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    acceptNode: (n) => (n.parentElement && n.parentElement.closest('figure,table,pre,code,.h-island,rt,.chapter-end,.paywall-mark') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
-  const re = /(?<![0-9A-Za-z.,])([0-9]{1,2}|[!?！？]{2})(?![0-9A-Za-z.,])/g;
+  const re = /([0-9]+(?:[.,][0-9]+)*)|([A-Za-z]+)|([!?]{1,2})/g;
   for (const n of nodes) {
     const s = n.nodeValue;
+    re.lastIndex = 0;
     if (!re.test(s)) continue;
     re.lastIndex = 0;
     const frag = document.createDocumentFragment();
     let last = 0, m;
     while ((m = re.exec(s))) {
+      const [tok, num, word, punct] = m;
+      let cls = null;
+      if (num) {
+        const prev = s[m.index - 1] || '', next = s[m.index + tok.length] || '';
+        const inWord = /[A-Za-z]/.test(prev) || /[A-Za-z]/.test(next);
+        if (!inWord) cls = /^[0-9]{1,2}$/.test(tok) ? 'tcy' : 'upr';
+      } else if (word) {
+        const prev = s[m.index - 1] || '', next = s[m.index + tok.length] || '';
+        if (/^[A-Z]{1,2}$/.test(word) && !/[0-9.]/.test(prev + next)) cls = 'tcy';
+        else if (/^[A-Z]{3,4}$/.test(word)) cls = 'upr';
+      } else if (punct) cls = punct.length === 2 ? 'tcy' : 'upr';
+      if (!cls) continue;
       if (m.index > last) frag.appendChild(document.createTextNode(s.slice(last, m.index)));
-      frag.appendChild(h('span', { class: 'tcy' }, m[1]));
-      last = m.index + m[0].length;
+      frag.appendChild(h('span', { class: cls }, tok));
+      last = m.index + tok.length;
     }
+    if (!last) continue;
     frag.appendChild(document.createTextNode(s.slice(last)));
     n.replaceWith(frag);
   }

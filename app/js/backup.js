@@ -136,6 +136,7 @@ export async function readBackup(file) {
       hidden: !!b.hidden, mergedInto: isId(b.mergedInto) ? b.mergedInto : null,
       seriesStatus: ['ongoing', 'complete'].includes(b.seriesStatus) ? b.seriesStatus : null,
       pop: str(b.pop, 200), popOnShelf: b.popOnShelf !== false, blurb: str(b.blurb, 1000), forWhom: str(b.forWhom, 200), shareBody: !!b.shareBody,
+      paywall: cleanPaywall(b.paywall, artIds),
       createdAt: str(b.createdAt, 40),
     });
     Object.assign(nb.design, {
@@ -156,5 +157,10 @@ export async function readBackup(file) {
   const bookIds = new Set(books.map((b) => b.id));
   shop.featured = (Array.isArray(s.featured) ? s.featured : []).filter((id) => bookIds.has(id)).slice(0, 3);
   return { shop, articles, books, images };
+}
+function cleanPaywall(p, artIds) {
+  const out = {};
+  if (p && typeof p === 'object') for (const [k, v] of Object.entries(p)) if (artIds.has(k) && v && Number.isInteger(v.at) && v.at >= 0) out[k] = { at: v.at, text: str(v.text, 60) };
+  return out;
 }
 function clampN(v, a, b, d) { const n = Number(v); return Number.isFinite(n) ? Math.min(b, Math.max(a, n)) : d; }
