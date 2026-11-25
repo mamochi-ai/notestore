@@ -828,3 +828,7 @@ img { max-width: 100%; }
 .guide-steps { margin: 6px 0 10px; padding-left: 1.5em; font-size: 14px; line-height: 1.8; }
 .guide-steps li::marker { color: var(--accent); font-weight: 700; }
 .guide-foot { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+
+.help-sub { font-family: var(--serif); font-weight: 700; margin: 1em 0 .4em !important; }
+.help-body a { color: var(--accent); }
+.help-body a svg { width: 14px; height: 14px; vertical-align: -2px; margin-left: 2px; }

@@ -74,7 +74,7 @@ export function showWelcome() {
       btn('サンプルの本屋を見る', showSample, { iconName: 'eye' }),
       btn('使い方を見る', () => openHelp({}), { iconName: 'book' }),
       fileInput),
-    h('p', { class: 'fine' }, 'noteのエクスポート機能で書き出したZIP（XMLと画像）またはXMLファイルを選んでください。ファイルはこの端末の中だけで処理され、どこにも送信されません。'),
+    h('p', { class: 'fine' }, 'noteのWebサイト（アプリでは不可）で、プロフィールアイコン →「自分の記事」→「エクスポート」で書き出したZIPを選んでください。くわしい手順は「使い方を見る」にあります。ファイルはこの端末の中だけで処理され、どこにも送信されません。'),
     app.storageOk ? null : h('p', { class: 'note-box warn' }, 'この環境では端末への保存が使えないようです（プライベートブラウズなど）。サンプルは見られますが、本屋を保存できません。'),
     h('p', { class: 'fine' }, h('button', { class: 'link', type: 'button', onclick: () => editor.openRestoreFromWelcome(afterImport) }, 'バックアップから復元する')),
   );
