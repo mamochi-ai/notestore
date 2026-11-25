@@ -1,5 +1,5 @@
 // Shop screen: header, shelf tabs, bookcase (bays), detail panel.
-import { h, clamp, textUnits, debounce, formatDate, $, $$, prefersReducedMotion } from './util.js';
+import { h, clamp, textUnits, debounce, formatDate, $, $$, prefersReducedMotion, hash32, rand01 } from './util.js';
 import { getTheme } from './themes.js';
 import { S, UNSORTED, visibleBooks, booksOnShelf, byOrder, bookArticles, bookUrl, bookStatus, STATUS_LABEL, imageUrl, saveBooks, saveShop, shelfExists } from './state.js';
 import { renderSpine, renderCover, renderFlat, bookDims, spineTitle, bookMeta, spineNeedsTwoCols } from './bookview.js';
@@ -25,9 +25,13 @@ export function mountShop(container, context) {
   render();
 }
 
-export function render() {
+export function render({ keepScroll = true } = {}) {
   if (!root || !S.shop) return;
   const theme = getTheme(S.shop.theme);
+  // Redrawing replaces the whole page. Hold its height and scroll position so the shelf
+  // does not jump (the browser would otherwise clamp the scroll while the page is momentarily short).
+  const sx = window.scrollX, sy = window.scrollY;
+  if (keepScroll && root.isConnected) root.style.minHeight = root.offsetHeight + 'px';
   applySignFont();
   startLightClock();
   if (view.selected && !S.books.has(view.selected)) view.selected = null;
@@ -63,6 +67,10 @@ export function render() {
   }
   layoutCase(theme);
   observeResize();
+  if (keepScroll) {
+    if (Math.abs(window.scrollY - sy) > 1) window.scrollTo(sx, sy);
+    requestAnimationFrame(() => { root.style.minHeight = ''; if (Math.abs(window.scrollY - sy) > 1) window.scrollTo(sx, sy); });
+  } else root.style.minHeight = '';
 }
 
 function renderNav() {
@@ -70,7 +78,13 @@ function renderNav() {
   const ordered = [...shelves.filter((s) => s.id !== UNSORTED), ...shelves.filter((s) => s.id === UNSORTED)];
   const tab = (id, label) => h('button', {
     class: 'shelf-tab', role: 'tab', type: 'button', 'aria-selected': String(view.tab === id),
-    onclick: () => { view.tab = id; view.query = ''; render(); },
+    onclick: () => {
+      view.tab = id; view.query = '';
+      render({ keepScroll: false });
+      // show the top of the chosen shelf
+      const nav = $('.shelf-nav', root);
+      if (nav && nav.getBoundingClientRect().top < 0) nav.scrollIntoView({ block: 'start' });
+    },
   }, label);
   const input = h('input', { type: 'search', placeholder: '本をさがす', 'aria-label': '本を検索', value: view.query, enterkeyhint: 'search' });
   const search = h('div', { class: `search${view.query ? ' open' : ''}` },
@@ -213,18 +227,22 @@ export function buildItems(books, g) {
     const face = faceOf(b);
     const vols = volumesOf(b);
     if (face === 'flat') {
-      // consecutive flat books form one pile (bottom = earlier in the saved order)
-      const entries = (vols || [null]).map((v) => ({ b, vol: v ? v.label : null, volIndex: v ? v.index : null, size: flatSize(b, g, v) }));
-      for (const e of entries) {
-        const hNow = pile ? pile.entries.reduce((n, x) => n + x.size.h, 0) : 0;
-        if (!pile || pile.entries.length >= 5 || hNow + e.size.h > g.maxBookH * 0.92) {
-          pile = { kind: 'pile', face: 'pile', entries: [], w: 0 };
-          items.push(pile);
-        }
-        pile.entries.push(e);
-        pile.w = Math.max(pile.w, e.size.w + 10);
-      }
-      const p = popFor(b); if (p) pops.push(p);
+      // 平積み: like a bookshop table display — several copies of the SAME book stacked
+      // (or its volumes 上・中・下), with one copy standing face-out on top of the stack.
+      pile = null; flushPops();
+      const copies = vols
+        ? vols.map((v) => ({ vol: v.label, volIndex: v.index })).reverse()
+        : Array.from({ length: 3 + (hash32(b.id + ':copies') % 2) }, () => ({ vol: null, volIndex: null }));
+      const fs = flatSize(b, g);
+      const th = Math.max(12, Math.min(fs.h, (g.maxBookH * 0.4) / copies.length));
+      const stackH = th * copies.length;
+      const coverH = Math.min(g.maxBookH * 0.96 - stackH, coverSize(g).h * 0.86);
+      const cover = coverH >= 56 ? { w: Math.min(coverH * 0.7, fs.w * 0.86), h: Math.min(coverH, fs.w * 0.86 / 0.7) } : null;
+      items.push({
+        kind: 'pile', face: 'pile', b, cover, w: fs.w + 10,
+        entries: copies.map((c, i) => ({ b, vol: c.vol, volIndex: c.volIndex, copy: i, size: { w: fs.w * (1 - (i % 2) * 0.01), h: th } })),
+      });
+      const p = popFor(b); if (p) items.push(p);
       continue;
     }
     pile = null; flushPops();
@@ -299,13 +317,21 @@ function shelfGroup(shelf, books, g, theme, { empty, noDrag } = {}) {
     list.forEach((it, j) => {
       let el;
       if (it.kind === 'pile') {
-        el = h('div', { class: 'pile' });
+        el = h('div', { class: 'pile', 'data-id': it.b.id });
         el.style.width = it.w + 'px';
-        for (const e of it.entries) {
+        it.entries.forEach((e, i) => {
           const fb = renderFlat(e.b, theme, { ...e.size, vol: e.vol, volIndex: e.volIndex });
-          // a natural, stable offset so the stack is not perfectly aligned
-          fb.style.marginLeft = ((bookDims(e.b).wf - 0.5) * 8 + (e.volIndex || 0) * 2) + 'px';
+          // copies are never stacked perfectly straight: a small, stable offset per copy
+          fb.style.marginLeft = (4 + (rand01(e.b.id + ':copy' + i) - 0.5) * 9) + 'px';
+          // one tap target per book: the standing copy (or the top copy when there is no room for it)
+          const focusable = !it.cover && i === it.entries.length - 1;
+          if (!focusable) { fb.setAttribute('tabindex', '-1'); fb.setAttribute('aria-hidden', 'true'); }
           el.appendChild(fb);
+        });
+        if (it.cover) {
+          const top = h('div', { class: 'pile-top' }, renderCover(it.b, theme, it.cover));
+          top.firstChild.setAttribute('aria-label', `${it.b.title}（平積み）`);
+          el.appendChild(top);
         }
       } else if (it.kind === 'book') {
         el = it.face === 'cover' ? renderCover(it.b, theme, it.size) : renderSpine(it.b, theme, { ...it.size, lean: it.lean, vol: it.vol, volIndex: it.volIndex });

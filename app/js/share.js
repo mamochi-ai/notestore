@@ -553,7 +553,13 @@ export async function paintShop({ shelfIds, featured, header }) {
             const ix = it._x;
             if (it.kind === 'pile') {
               let yy = baseY;
-              for (const e of it.entries) { yy -= e.size.h; paintFlat(c, e.b, theme, ix + 4 + (e.volIndex || 0) * 2, yy, e.size.w, e.size.h, e.vol); }
+              it.entries.forEach((e, i) => { yy -= e.size.h; paintFlat(c, e.b, theme, ix + 4 + ((i * 37) % 7) - 3, yy, e.size.w, e.size.h, e.vol); });
+              if (it.cover) {
+                const cx = ix + (it.w - it.cover.w) / 2;
+                c.save(); c.translate(cx + it.cover.w / 2, yy); c.rotate(-1.5 * Math.PI / 180);
+                await paintCover(c, it.b, theme, -it.cover.w / 2, -it.cover.h, it.cover.w, it.cover.h);
+                c.restore();
+              }
             } else if (it.face === 'cover') await paintCover(c, it.b, theme, ix, baseY - it.size.h, it.size.w, it.size.h);
             else if (it.lean) {
               c.save(); c.translate(ix + it.size.w, baseY); c.rotate(6 * Math.PI / 180);

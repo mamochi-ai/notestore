@@ -590,8 +590,8 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     const r = await page.evaluate(async () => {
       const ind = await import('/app/js/individual.js');
       const q = (s) => document.querySelector(s);
-      const pile = q('.pile');
-      const flats = pile ? [...pile.querySelectorAll('.book.flat')].map((e) => [e.dataset.id, e.getBoundingClientRect().top]) : [];
+      const pileOf = (id) => q(`.pile[data-id="${id}"]`);
+      const flats = ['bk7', 'bk9'].map((id) => { const p = pileOf(id); return p ? { copies: p.querySelectorAll('.book.flat').length, cover: !!p.querySelector('.pile-top .book.cover'), focus: p.querySelectorAll('.book:not([tabindex="-1"])').length, sameId: [...p.querySelectorAll('.book')].every((e) => e.dataset.id === id) } : null; });
       const lean = q('.book.lean');
       return {
         obiCover: !!q('.book.cover[data-id="bk1"] .cv-obi') && q('.book.cover[data-id="bk1"] .cv-obi').textContent,
@@ -605,7 +605,7 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     });
     assert(r.obiCover === '三か月、誰にも読まれなかった。', 'obi on cover ' + r.obiCover);
     assert(r.obiFlat, 'obi on flat book');
-    assert(r.flats.length === 2 && r.flats[0][0] === 'bk7' && r.flats[0][1] > r.flats[1][1], 'pile order (earlier book at the bottom): ' + JSON.stringify(r.flats));
+    assert(r.flats.every((f) => f && f.copies >= 3 && f.cover && f.focus === 1 && f.sameId), 'flat display (copies + standing cover, one tap target): ' + JSON.stringify(r.flats));
     assert(r.lean, 'lean rotation');
     assert(JSON.stringify(r.vols) === '["上","中","下"]', 'volumes ' + r.vols);
     assert(/^店主の\d{4}年\d{1,2}月の一冊$/.test(r.monthly), 'monthly ' + r.monthly);
@@ -680,6 +680,53 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     assert(lit === 'off', 'lighting lost in link ' + lit);
     await ctx.close();
     return r.phases.join(' ');
+  });
+
+  await test('本を選んでもスクロール位置がずれない（iPad縦・横、iPhone）／分冊の平積みは上巻が上', async () => {
+    const res = [];
+    for (const vp of [{ width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+      const { ctx, page } = await newPage(vp);
+      await page.goto(BASE);
+      await page.getByText('サンプルの本屋を見る').click();
+      await page.waitForSelector('.bay .book');
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await page.waitForTimeout(250);
+      const y0 = await page.evaluate(() => scrollY);
+      await page.locator('.shelf-group').last().locator('.book').first().click();
+      await page.waitForTimeout(350);
+      const y1 = await page.evaluate(() => scrollY);
+      assert(Math.abs(y1 - y0) <= 2 && y0 > 200, `${vp.width}: scroll ${y0} → ${y1}`);
+      res.push(`${vp.width}:${y0}→${y1}`);
+      await ctx.close();
+    }
+    const { ctx, page } = await newPage();
+    await page.goto(BASE);
+    await page.getByText('サンプルの本屋を見る').click();
+    await page.waitForSelector('.bay .book');
+    const order = await page.evaluate(async () => {
+      const st = await import('/app/js/state.js'); st.S.books.get('bk8').face = 'flat'; (await import('/app/js/shelf.js')).render();
+      return [...document.querySelectorAll('.pile[data-id="bk8"] .book.flat')].map((e) => [e.textContent.slice(-1), e.getBoundingClientRect().top]).sort((a, b) => a[1] - b[1]).map((x) => x[0]).join('');
+    });
+    assert(order === '上中下', 'volume stack top→bottom: ' + order);
+    await ctx.close();
+    return res.join(' ');
+  });
+
+  await test('装丁編集：本のタイトルと「印刷する短い題名」が両タブで同じ項目として表示される', async () => {
+    const { ctx, page } = await newPage();
+    await page.goto(BASE);
+    await page.getByText('サンプルの本屋を見る').click();
+    await page.waitForSelector('.bay .book');
+    await page.evaluate(async () => { const e = await import('/app/js/editor.js'); const st = await import('/app/js/state.js'); e.openDesignEditor(st.S.books.get('bk2'), {}); });
+    await page.getByRole('tab', { name: '背表紙' }).click();
+    await page.getByLabel('表紙・背表紙に印刷する短い題名（「文字」タブと同じ項目）').fill('はじめて');
+    await page.getByRole('tab', { name: '文字' }).click();
+    const v = await page.getByLabel('表紙・背表紙に印刷する短い題名（「背表紙」タブと同じ項目）').inputValue();
+    const full = await page.getByLabel('本のタイトル（本の詳細・目次・共有に出る正式な題名）').inputValue();
+    const preview = await page.locator('.design-preview .sp-title').innerText();
+    assert(v === 'はじめて' && full === 'はじめてのアプリ' && preview.replace(/\s/g, '') === 'はじめて', JSON.stringify({ v, full, preview }));
+    await ctx.close();
+    return `正式名「${full}」／印刷「${v}」`;
   });
 
   // ---------- published ZIP ----------

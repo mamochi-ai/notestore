@@ -698,7 +698,8 @@ export function openDesignEditor(book, ctx) {
       }
       const st = h('input', { type: 'text', class: 'text', value: d.spineTitle || '', placeholder: `自動：${autoSpineTitle(d.title)}`, maxlength: '60' });
       st.addEventListener('input', () => { d.spineTitle = st.value.trim() || null; update(); });
-      els.push(h('div', { class: 'field' }, h('label', null, '背表紙の題名（空欄なら自動で短くします）', st)));
+      els.push(h('div', { class: 'field' }, h('label', null, '表紙・背表紙に印刷する短い題名（「文字」タブと同じ項目）', st),
+        h('p', { class: 'hint' }, '空欄なら本のタイトルから自動で短くします。本のタイトル（本の詳細や目次に出る正式な題名）は「文字」タブで変えられます。')));
       const styleSel = h('select', { class: 'text' }, h('option', { value: '' }, '自動（テーマに合わせる）'), ...Object.entries(SPINE_STYLE_NAMES).map(([k, v]) => h('option', { value: k, selected: D.spineStyle === k || null }, v)));
       styleSel.addEventListener('change', () => { D.spineStyle = styleSel.value || null; update(); });
       els.push(h('div', { class: 'field' }, h('label', null, '背表紙の形', styleSel)));
@@ -706,7 +707,13 @@ export function openDesignEditor(book, ctx) {
       const t = h('input', { type: 'text', class: 'text', value: d.title, maxlength: '120' });
       t.addEventListener('input', () => { d.title = t.value; update(); });
       const orig = bookArticles(d).map((a) => a.title).filter(Boolean);
-      els.push(h('div', { class: 'field' }, h('label', null, '本のタイトル', t), orig.length ? h('p', { class: 'hint' }, `元の記事タイトル：${orig.slice(0, 3).join(' ／ ')}${orig.length > 3 ? ' …' : ''}（元の記事は変更されません）`) : null));
+      els.push(h('div', { class: 'field' }, h('label', null, '本のタイトル（本の詳細・目次・共有に出る正式な題名）', t), orig.length ? h('p', { class: 'hint' }, `元の記事タイトル：${orig.slice(0, 3).join(' ／ ')}${orig.length > 3 ? ' …' : ''}（元の記事は変更されません）`) : null));
+      // the same short title as on the 背表紙 tab (one field, shown in both places)
+      const st2 = h('input', { type: 'text', class: 'text', value: d.spineTitle || '', placeholder: `自動：${autoSpineTitle(d.title)}`, maxlength: '60' });
+      st2.addEventListener('input', () => { d.spineTitle = st2.value.trim() || null; update(); });
+      t.addEventListener('input', () => { st2.placeholder = `自動：${autoSpineTitle(t.value)}`; });
+      els.push(h('div', { class: 'field' }, h('label', null, '表紙・背表紙に印刷する短い題名（「背表紙」タブと同じ項目）', st2),
+        h('p', { class: 'hint' }, '本の表紙と背表紙にはこの短い題名が印刷されます。空欄なら本のタイトルから自動で作ります。')));
       els.push(check('表紙に著者名（店主名）を出す', () => D.showAuthor !== false, (v) => { D.showAuthor = v; }));
       els.push(check('表紙に題名を出す', () => D.showTitle !== false, (v) => { D.showTitle = v; }));
       els.push(seg('題名の位置', () => D.titleAlign || 'top', (v) => { D.titleAlign = v; }, [['top', '上'], ['center', '中央'], ['bottom', '下']]));

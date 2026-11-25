@@ -786,3 +786,12 @@ img { max-width: 100%; }
   linear-gradient(180deg, rgba(127, 220, 232, .18), transparent 6%); }
 :root[data-theme="future"][data-light="evening"] .bay-glow { background: radial-gradient(ellipse 60% 80% at 15% 10%, rgba(255, 170, 140, .2), transparent 70%); }
 :root[data-theme="future"][data-light="morning"] .bay-glow { background: linear-gradient(112deg, rgba(220, 245, 255, .3), transparent 45%); }
+
+/* 平積み（作り直し）: 同じ本を数冊重ね、いちばん上に1冊を表紙向きに立てる */
+.pile { align-items: flex-start; }
+.pile .book.flat { margin-bottom: 0; }
+.pile .book.flat:not(:first-child) { margin-bottom: -1px; }
+.pile .book.flat.is-selected { transform: none; }
+.pile-top { align-self: center; position: relative; z-index: 1; margin-bottom: -2px; transform: rotate(-1.5deg); transform-origin: 50% 100%; }
+.pile-top .book::before { display: none; }
+.pile-top .book::after { left: 4%; right: 4%; bottom: -3px; height: 5px; }
