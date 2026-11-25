@@ -34,6 +34,12 @@ export function defaultShop() {
     theme: 'warm',
     featured: [], featuredPop: 'まず読んでほしい3冊',
     shelves: [{ id: UNSORTED, name: '未分類' }],
+    // individuality (added later; old data gets these defaults)
+    signFont: 'mincho',            // 看板・棚札の書体: mincho | boldmincho | maru | gothic
+    seal: { text: '', show: true }, // 店主の印（text が空なら店主名から自動）
+    weathering: true,               // 日焼け（古い本ほど背が褪せる）
+    thickness: 'design',            // 本の厚み: design（演出） | length（本文の文字数）
+    monthly: null,                  // 今月の一冊 {bookId, month:'YYYY-MM', note}
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
 }
@@ -45,6 +51,7 @@ export function newBook(fields) {
     shelfId: UNSORTED, order: Date.now(), face: 'spine',
     hidden: false, mergedInto: null, seriesStatus: null,
     pop: '', popOnShelf: true, blurb: '', forWhom: '', shareBody: false, paywall: {},
+    obi: { text: '', color: null }, volumes: 0,
     design: {
       color: null, material: null, motif: null,
       coverImageId: undefined, coverPos: { x: 50, y: 50, s: 1 },

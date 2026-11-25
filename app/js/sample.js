@@ -19,6 +19,7 @@ const ARTICLES = [
 ];
 
 export function sampleData() {
+  const d0 = new Date(); const month = `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, '0')}`;
   const now = Date.now();
   const articles = ARTICLES.map(([id, title, html], i) => ({
     id, title, html, url: null, status: 'sample', date: new Date(now - (ARTICLES.length - i) * 86400000 * 5).toISOString(),
@@ -29,20 +30,22 @@ export function sampleData() {
     owner: '架空の店主', intro: 'これはサンプルの本屋です。\n実在の記事ではありません。あなたのnoteの記事を読み込むと、ここがあなたの本屋になります。',
     profileUrl: '', avatarImageId: null, theme: 'warm',
     featured: ['bk2', 'bk5', 'bk8'], featuredPop: 'まず読んでほしい3冊',
+    signFont: 'mincho', seal: { text: '物語', show: true }, weathering: true, thickness: 'design',
+    monthly: { bookId: 'bk6', month, note: '寒くなってきたので、好きなものの話を。\n読むと少しあたたかくなる一冊です。' },
     shelves: [{ id: 'make', name: 'ものづくり' }, { id: 'life', name: '暮らしと日々' }, { id: 'trip', name: '旅' }, { id: 'unsorted', name: '未分類' }],
   };
   const B = (id, art, shelf, order, extra = {}) => newBook({ id, title: articles.find((a) => a.id === art).title, articleIds: [art], shelfId: shelf, order, ...extra });
   const books = [
-    B('bk1', 's1', 'make', 1, { face: 'cover', pop: 'この記事から、\n全部始まりました。', blurb: 'iPadだけで、最初のひとつを作ってみた記録（架空のサンプル）。', forWhom: '作りたいものはあるけど、最初の一歩で止まっている人へ', design: { ...newBook({}).design, motif: 'tablet' } }),
+    B('bk1', 's1', 'make', 1, { face: 'cover', obi: { text: '三か月、誰にも読まれなかった。', color: '#c8452f' }, pop: 'この記事から、\n全部始まりました。', blurb: 'iPadだけで、最初のひとつを作ってみた記録（架空のサンプル）。', forWhom: '作りたいものはあるけど、最初の一歩で止まっている人へ', design: { ...newBook({}).design, motif: 'tablet' } }),
     B('bk2', 's2', 'make', 2),
     B('bk3', 's3', 'make', 3, { pop: '何度でも、また作る。', popOnShelf: false, blurb: 'うまくいかなかった日も、残しておこう。そう思って書いた一冊です。', forWhom: '途中でやめたものが、フォルダにたまっている人へ', design: { ...newBook({}).design, color: '#b45f43', motif: 'notebook' } }),
     B('bk4', 's4', 'make', 4),
     B('bk5', 's5', 'life', 1, { design: { ...newBook({}).design, color: '#2e4566', motif: 'rain' } }),
     B('bk6', 's6', 'life', 2, { face: 'cover', pop: 'あまり読まれてないけど、\n好きな一本', design: { ...newBook({}).design, color: '#efe8d8', motif: 'sprig' } }),
-    B('bk7', 's7', 'life', 3),
-    B('bk9', 's11', 'life', 4),
-    B('bk10', 's12', 'make', 5),
-    newBook({ id: 'bk8', title: '旅の途中', articleIds: ['s8', 's9', 's10'], kind: 'serial', mode: 'novel', writing: 'vertical', shelfId: 'trip', order: 1, seriesStatus: 'ongoing', blurb: '知らない駅で降りた「わたし」が、背表紙のない本ばかりの本屋に出会う連載小説（架空のサンプル）。', forWhom: '静かな物語を、少しずつ読みたい人へ', pop: '第1話の最後の一行が好きです', design: { ...newBook({}).design, color: '#e6dcc4', motif: 'mountain', titleWriting: 'vertical' } }),
+    B('bk7', 's7', 'life', 3, { face: 'flat' }),
+    B('bk9', 's11', 'life', 4, { face: 'flat', obi: { text: '夜の商店街へ', color: '#2d4a6b' } }),
+    B('bk10', 's12', 'make', 5, { face: 'lean' }),
+    newBook({ id: 'bk8', title: '旅の途中', articleIds: ['s8', 's9', 's10'], kind: 'serial', mode: 'novel', writing: 'vertical', shelfId: 'trip', order: 1, seriesStatus: 'ongoing', volumes: 3, blurb: '知らない駅で降りた「わたし」が、背表紙のない本ばかりの本屋に出会う連載小説（架空のサンプル）。', forWhom: '静かな物語を、少しずつ読みたい人へ', pop: '第1話の最後の一行が好きです', design: { ...newBook({}).design, color: '#e6dcc4', motif: 'mountain', titleWriting: 'vertical' } }),
   ];
   return { shop, articles, books, images: [] };
 }

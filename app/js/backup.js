@@ -7,6 +7,7 @@ import { extFor, sniffImage } from './images.js';
 import { listZip, extract, isZip, LIMITS } from './zipsafe.js';
 import { sanitizeHtml } from './sanitize.js';
 import { THEME_MAP } from './themes.js';
+import { cleanShopExtras, cleanBookExtras } from './individual.js';
 
 const APP = 'little-bookshop';
 
@@ -132,11 +133,12 @@ export async function readBackup(file) {
       articleIds: (Array.isArray(b.articleIds) ? b.articleIds : []).filter((x) => artIds.has(x)),
       kind: ['single', 'serial', 'anthology'].includes(b.kind) ? b.kind : 'single',
       mode: b.mode === 'novel' ? 'novel' : 'post', writing: b.writing === 'vertical' ? 'vertical' : 'horizontal',
-      shelfId: isId(b.shelfId) ? b.shelfId : UNSORTED, order: Number(b.order) || 0, face: b.face === 'cover' ? 'cover' : 'spine',
+      shelfId: isId(b.shelfId) ? b.shelfId : UNSORTED, order: Number(b.order) || 0,
       hidden: !!b.hidden, mergedInto: isId(b.mergedInto) ? b.mergedInto : null,
       seriesStatus: ['ongoing', 'complete'].includes(b.seriesStatus) ? b.seriesStatus : null,
       pop: str(b.pop, 200), popOnShelf: b.popOnShelf !== false, blurb: str(b.blurb, 1000), forWhom: str(b.forWhom, 200), shareBody: !!b.shareBody,
       paywall: cleanPaywall(b.paywall, artIds),
+      ...cleanBookExtras({ face: b.face, obi: b.obi, volumes: b.volumes }),
       createdAt: str(b.createdAt, 40),
     });
     Object.assign(nb.design, {
@@ -156,6 +158,7 @@ export async function readBackup(file) {
   }).filter((b) => b.articleIds.length);
   const bookIds = new Set(books.map((b) => b.id));
   shop.featured = (Array.isArray(s.featured) ? s.featured : []).filter((id) => bookIds.has(id)).slice(0, 3);
+  Object.assign(shop, cleanShopExtras(s, bookIds));
   return { shop, articles, books, images };
 }
 function cleanPaywall(p, artIds) {

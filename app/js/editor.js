@@ -15,6 +15,7 @@ import { exportBackup, openRestore } from './backup.js';
 import { storageInfo } from './db.js';
 import { uid } from './util.js';
 import { listBlocks, locate } from './paywall.js';
+import { FACES, faceOf, OBI_COLORS, SIGN_FONTS, sealText, sealEl, thisMonth, monthLabel, volumeLabels } from './individual.js';
 
 const rerender = () => render();
 
@@ -31,7 +32,6 @@ export function bookTools(b, ctx) {
   const box = h('div', { class: 'edit-tools', role: 'group', 'aria-label': 'この本の編集' },
     btn('装丁・POPを編集', () => openDesignEditor(b, ctx), { cls: 'primary', iconName: 'edit' }),
     h('div', { class: 'row' },
-      btn(b.face === 'cover' ? '背表紙向きにする' : '表紙向きにする', async () => { b.face = b.face === 'cover' ? 'spine' : 'cover'; await saveBooks([b]).catch(() => {}); rerender(); }, { cls: 'small' }),
       btn(featured ? 'おすすめから外す' : `おすすめに飾る（${S.shop.featured.length}/3）`, async () => {
         if (featured) S.shop.featured = S.shop.featured.filter((x) => x !== b.id);
         else {
@@ -41,7 +41,8 @@ export function bookTools(b, ctx) {
         await saveShop().catch(() => {});
         rerender();
       }, { cls: 'small' })),
-    h('div', { class: 'row' }, h('label', null, '移動先', shelfSel)),
+    h('div', { class: 'row' }, h('label', null, '置き方', faceSel(b)), h('label', null, '移動先', shelfSel)),
+    h('div', { class: 'row' }, monthlyBtn(b)),
     h('div', { class: 'row' },
       btn('前へ', () => nudgeBook(b.id, -1), { cls: 'small', iconName: 'left', attrs: { 'data-nudge': '-1' } }),
       btn('後ろへ', () => nudgeBook(b.id, 1), { cls: 'small', iconName: 'right', attrs: { 'data-nudge': '1' } }),
@@ -54,6 +55,28 @@ export function bookTools(b, ctx) {
       btn('本を削除', () => removeBook(b), { cls: 'small danger', iconName: 'trash' })),
   );
   return box;
+}
+
+function faceSel(b) {
+  const sel = h('select', { 'aria-label': '置き方' }, ...FACES.map(([k, l]) => h('option', { value: k, selected: faceOf(b) === k || null }, l)));
+  sel.addEventListener('change', async () => {
+    b.face = sel.value;
+    await saveBooks([b]).catch(() => {});
+    rerender();
+    toast(sel.value === 'flat' ? '平積みにしました（続けて平積みにした本は同じ山に重なります）' : sel.value === 'lean' ? '立てかけにしました（右どなりの本にもたれます）' : '置き方を変えました');
+  });
+  return sel;
+}
+function monthlyBtn(b) {
+  const m = S.shop.monthly;
+  const isIt = m && m.bookId === b.id && m.month === thisMonth();
+  return btn(isIt ? `今月の一冊を外す` : `今月（${monthLabel(thisMonth())}）の一冊にする`, async () => {
+    if (isIt) S.shop.monthly = null;
+    else S.shop.monthly = { bookId: b.id, month: thisMonth(), note: m && m.bookId === b.id ? m.note || '' : '' };
+    await saveShop().catch(() => {});
+    rerender();
+    if (!isIt) toast('棚のいちばん上に飾りました。添えることばは「お店の設定」で書けます。');
+  }, { cls: 'small' });
 }
 
 function orderedShelves() {
@@ -435,15 +458,30 @@ export function openShopSettings(ctx) {
   const intro = h('textarea', { maxlength: '600' }); intro.value = s.intro || '';
   const profile = h('input', { type: 'url', value: s.profileUrl || '', placeholder: 'https://note.com/…', inputmode: 'url' });
   const featPop = h('input', { type: 'text', value: s.featuredPop || '', maxlength: '30' });
+  const signSel = h('select', null, ...SIGN_FONTS.map(([k, l]) => h('option', { value: k, selected: (s.signFont || 'mincho') === k || null }, l)));
+  const sealIn = h('input', { type: 'text', class: 'text', maxlength: '4', placeholder: `自動：${sealText({ ...s, seal: { text: '' } }) || '（店主名が必要）'}`, value: (s.seal && s.seal.text) || '', style: 'max-width:12em', 'aria-label': '印の文字' });
+  const sealShow = h('input', { type: 'checkbox', checked: !(s.seal && s.seal.show === false) || null });
+  const sealShowL = h('label', { class: 'check' }, sealShow, h('span', null, '印を押す'));
+  const sealPreview = h('span', { class: 'seal-preview' });
+  const drawSeal = () => sealPreview.replaceChildren(sealEl(52, { ...s, owner: owner.value, seal: { text: sealIn.value, show: true } }) || h('span', { class: 'hint' }, '（文字なし）'));
+  sealIn.addEventListener('input', drawSeal); owner.addEventListener('input', drawSeal);
+  drawSeal();
+  const weatherCb = h('input', { type: 'checkbox', checked: s.weathering !== false || null });
+  const thickSel = h('select', null, h('option', { value: 'design', selected: s.thickness !== 'length' || null }, '演出（見た目のばらつき）'), h('option', { value: 'length', selected: s.thickness === 'length' || null }, '本文の文字数'));
+  const mPick = s.monthly && S.books.get(s.monthly.bookId);
+  const monthlyNote = h('textarea', { maxlength: '120', rows: '2', placeholder: '例：寒くなってきたので、この一冊を。' }); monthlyNote.value = (s.monthly && s.monthly.note) || '';
+  const monthlyBox = mPick
+    ? h('div', { class: 'field' }, h('label', null, `${monthLabel(s.monthly.month)}の一冊「${mPick.title}」に添えることば`, monthlyNote), h('p', { class: 'hint' }, '空欄ならその本のPOPを使います。本を替えるには、本を選んで「今月の一冊にする」を押してください。'))
+    : h('p', { class: 'hint' }, '今月の一冊：本を選んで「今月の一冊にする」を押すと、棚のいちばん上に飾られます。');
   let avatarId = s.avatarImageId;
   let pendingAvatar = null;
   const avatarBox = h('div', { style: 'display:flex;gap:12px;align-items:center;flex-wrap:wrap' });
   const drawAvatar = () => {
     const url = pendingAvatar ? URL.createObjectURL(pendingAvatar.blob) : avatarId && imageUrl(avatarId);
-    avatarBox.replaceChildren(
+    avatarBox.replaceChildren(...[
       url ? h('img', { src: url, alt: 'プロフィール画像', style: 'width:64px;height:64px;border-radius:50%;object-fit:cover' }) : h('span', { class: 'hint' }, '未設定'),
       fileButton('画像を選ぶ', async (file) => { try { pendingAvatar = await intakeFile(file, { maxSide: 400 }); drawAvatar(); } catch (e) { toast(e.message, 'error'); } }),
-      (url ? btn('外す', () => { avatarId = null; pendingAvatar = null; drawAvatar(); }, { cls: 'small' }) : null));
+      (url ? btn('外す', () => { avatarId = null; pendingAvatar = null; drawAvatar(); }, { cls: 'small' }) : null)].filter(Boolean));
   };
   drawAvatar();
   const info = h('p', { class: 'hint' }, '保存容量を確認しています…');
@@ -456,6 +494,13 @@ export function openShopSettings(ctx) {
     h('div', { class: 'field' }, h('span', null, 'プロフィール画像（任意）'), avatarBox),
     f('noteプロフィールURL（任意）', profile, 'https://note.com/ から始まるURLのみ。共有リンクにも含まれます。'),
     f('おすすめ棚のPOP', featPop, '「初めての方へ」の棚に立てる札の文字です。空にすると札を出しません。'),
+    h('h3', null, 'お店らしさ'),
+    f('看板・棚札の書体', signSel, '店名と棚札の書体です。棚札の名前は「棚」から自由に変えられます（例：夜中に作ったもの）。'),
+    h('div', { class: 'field' }, h('span', null, '店主の印'), h('div', { style: 'display:flex;gap:12px;align-items:center;flex-wrap:wrap' }, sealPreview, sealIn, sealShowL),
+      h('p', { class: 'hint' }, '空欄なら店主名から作ります（最大4文字）。店名の横・店主欄・今月の一冊に押されます。')),
+    h('label', { class: 'check' }, weatherCb, h('span', null, '日焼け：古い記事の本ほど背が少し褪せる（いちばん新しい本は褪せません）')),
+    f('本の厚み', thickSel, '「本文の文字数」にすると、長く書いた本ほど厚くなります。本文の無い本はこれまでどおりの厚みです。'),
+    monthlyBox,
     h('h3', null, 'データの保存とバックアップ'),
     h('p', { class: 'hint' }, 'データはこの端末のブラウザの中だけに保存されています。Safariの「履歴とWebサイトデータを消去」などで消えることがあるため、ときどきバックアップを書き出してください。'),
     info,
@@ -477,6 +522,9 @@ export function openShopSettings(ctx) {
       if (url && !isNoteUrl(url)) { toast('プロフィールURLは https://note.com/ のURLを入れてください', 'error'); profile.focus(); return false; }
       s.name = name.value.trim() || 'わたしの小さな本屋'; s.tagline = tagline.value.trim(); s.owner = owner.value.trim();
       s.intro = intro.value.trim(); s.profileUrl = url ? safeHttpUrl(url) : ''; s.featuredPop = featPop.value.trim();
+      s.signFont = signSel.value; s.seal = { text: sealIn.value.trim(), show: sealShow.checked };
+      s.weathering = weatherCb.checked; s.thickness = thickSel.value;
+      if (s.monthly && mPick) s.monthly = { ...s.monthly, note: monthlyNote.value.trim() };
       const images = [];
       if (pendingAvatar) { images.push(pendingAvatar); avatarId = pendingAvatar.id; }
       s.avatarImageId = avatarId;
@@ -674,10 +722,23 @@ export function openDesignEditor(book, ctx) {
       els.push(h('div', { class: 'field' }, h('label', null, 'こんな人へ（80字まで）', who)));
       els.push(h('div', { class: 'field' }, h('label', null, '店主のおすすめ理由（120字まで・棚のPOPにもなります）', pop), h('p', { class: 'hint' }, '以前の「店主のPOP」と同じ項目です。40字以内なら棚にも小さく立てられます。')));
       els.push(check('棚にもPOPを立てる（40字以内のとき）', () => d.popOnShelf !== false, (v) => { d.popOnShelf = v; }));
+      if (!d.obi) d.obi = { text: '', color: null };
+      const obi = h('input', { type: 'text', class: 'text', maxlength: '30', placeholder: '例：三か月、誰にも読まれなかった。', value: d.obi.text || '' });
+      obi.addEventListener('input', () => { d.obi = { ...d.obi, text: obi.value }; update(); });
+      els.push(h('h3', null, '帯'));
+      els.push(h('div', { class: 'field' }, h('label', null, '帯の文字（30字まで・空なら帯を巻きません）', obi), h('p', { class: 'hint' }, '本屋の帯のように表紙の下に巻かれ、背表紙の下にも色が見えます。')));
+      els.push(colorField('帯の色', () => d.obi.color, (v) => { d.obi = { ...d.obi, color: v }; update(); }, OBI_COLORS.map(([c]) => c)));
     } else if (tab === 'read') {
       els.push(seg('表示モード', () => d.mode, (v) => { d.mode = v; }, [['post', '通常（記事）'], ['novel', '小説']]));
       els.push(seg('標準の書字方向', () => d.writing, (v) => { d.writing = v; }, [['horizontal', '横書き'], ['vertical', '縦書き']]));
       if (d.kind !== 'single') els.push(seg('連載の状態', () => d.seriesStatus || null, (v) => { d.seriesStatus = v; }, [[null, '表示しない'], ['ongoing', '連載中'], ['complete', '完結']]));
+      if (d.kind !== 'single' && d.articleIds.length >= 2) {
+        const opts = [[0, '分けない']];
+        for (let n = 2; n <= Math.min(10, d.articleIds.length); n++) opts.push([n, `${n}冊（${volumeLabels(n).join('・')}）`]);
+        const vs = h('select', { class: 'text', 'aria-label': '分冊' }, ...opts.map(([v, l]) => h('option', { value: String(v), selected: (d.volumes || 0) === v || null }, l)));
+        vs.addEventListener('change', () => { d.volumes = parseInt(vs.value, 10) || 0; });
+        els.push(h('div', { class: 'field' }, h('label', null, '分冊（章を順番どおりに均等に分け、棚に巻数つきで並べます）', vs)));
+      }
       // paid section boundary (note's export doesn't contain it → the owner marks it)
       if (!d.paywall) d.paywall = {};
       els.push(h('h3', null, '有料部分'));

@@ -2,7 +2,8 @@
 import { h, clamp, textUnits, debounce, formatDate, $, $$, prefersReducedMotion } from './util.js';
 import { getTheme } from './themes.js';
 import { S, UNSORTED, visibleBooks, booksOnShelf, byOrder, bookArticles, bookUrl, bookStatus, STATUS_LABEL, imageUrl, saveBooks, saveShop, shelfExists } from './state.js';
-import { renderSpine, renderCover, bookDims, spineTitle, bookMeta, spineNeedsTwoCols } from './bookview.js';
+import { renderSpine, renderCover, renderFlat, bookDims, spineTitle, bookMeta, spineNeedsTwoCols } from './bookview.js';
+import { faceOf, volumesOf, lengthThickness, prepareFade, applySignFont, sealEl, monthlyPick, monthLabel } from './individual.js';
 import { icon, logo, btn, anyModalOpen } from './ui.js';
 import { bookReadingTime, formatMinutes, CHARS_PER_MINUTE } from './readtime.js';
 import { hasPaid } from './paywall.js';
@@ -27,6 +28,7 @@ export function mountShop(container, context) {
 export function render() {
   if (!root || !S.shop) return;
   const theme = getTheme(S.shop.theme);
+  applySignFont();
   if (view.selected && !S.books.has(view.selected)) view.selected = null;
   if (view.tab !== 'all' && view.tab !== 'search' && !shelfExists(view.tab)) view.tab = 'all';
   root.classList.toggle('editing', !!ctx.editing);
@@ -34,6 +36,7 @@ export function render() {
   const header = h('header', { class: 'shop-header' },
     h('div', { class: 'shop-brand' }, logo(),
       h('h1', { class: 'shop-name' }, S.shop.name || 'わたしの小さな本屋'),
+      sealEl(30),
       S.shop.tagline ? h('p', { class: 'shop-tagline' }, S.shop.tagline) : null),
     h('div', { class: 'shop-actions' }, ...(ctx.headerActions ? ctx.headerActions() : [])));
 
@@ -110,10 +113,11 @@ export function geometry(W, theme) {
 export function spineSize(b, g) {
   const { hf, wf } = bookDims(b);
   const ht = g.maxBookH * (0.76 + 0.22 * hf);
-  let w = clamp(ht * (0.15 + 0.07 * wf), 36, 66);
+  const real = lengthThickness(b, ht);
+  let w = real != null ? real : clamp(ht * (0.15 + 0.07 * wf), 36, 66);
   // thicker spine when the title needs two columns
-  if (spineNeedsTwoCols(spineTitle(b), ht)) w = clamp(Math.max(w, 44), 44, 70);
-  if (b.kind !== 'single') w = clamp(w + Math.min(b.articleIds.length, 8) * 2.2, 36, 76);
+  if (spineNeedsTwoCols(spineTitle(b), ht)) w = clamp(Math.max(w, 44), 44, Math.max(70, w));
+  if (real == null && b.kind !== 'single') w = clamp(w + Math.min(b.articleIds.length, 8) * 2.2, 36, 76);
   return { w, h: ht };
 }
 export function coverSize(g, k = 0.86) {
@@ -123,6 +127,7 @@ export function coverSize(g, k = 0.86) {
 
 function layoutCase(theme) {
   if (!caseEl) return;
+  prepareFade();
   const W = Math.floor(caseEl.clientWidth - 28) || 600; // case padding
   lastWidth = caseEl.clientWidth;
   const g = geometry(W, theme);
@@ -134,6 +139,8 @@ function layoutCase(theme) {
     frag.appendChild(shelfGroup({ id: null, name: `「${view.query}」の検索結果（${hits.length}冊）` }, hits, g, theme, { empty: '見つかりませんでした。別のことばで探してみてください。', noDrag: true }));
   } else {
     if (view.tab === 'all') {
+      const pick = monthlyPick();
+      if (pick) frag.appendChild(monthlyBay(pick, g, theme));
       const feat = S.shop.featured.map((id) => S.books.get(id)).filter((b) => b && !b.hidden).slice(0, 3);
       if (feat.length || ctx.editing) frag.appendChild(featuredBay(feat, g, theme));
     }
@@ -177,21 +184,63 @@ function bayEl(g, theme) {
 /** Gap placed before an item: spines lean together, covers / POP get an intended space. */
 export function itemGap(prev, it, g) {
   if (!prev) return 0;
-  if (prev.kind === 'book' && prev.face === 'spine' && it.kind === 'book' && it.face === 'spine') return 1;
+  const tight = (x) => x.kind === 'book' && (x.face === 'spine' || x.face === 'lean');
+  if (tight(prev) && tight(it)) return 1;
   if (it.kind === 'pop') return 4; // a POP stands right next to its own book
   return clamp(g.W * 0.022, 8, 18);
 }
+const LEAN = Math.sin(6 * Math.PI / 180);
+function flatSize(b, g, vol) {
+  const { hf, wf } = bookDims(b);
+  const len = coverSize(g).h * (0.82 + 0.14 * hf) * (vol ? 0.97 : 1);
+  const sp = spineSize(b, g);
+  return { w: len, h: clamp(sp.w * 0.56 + wf * 4, 15, 34) };
+}
 export function buildItems(books, g) {
   const items = [];
+  let pile = null;
+  const pops = [];
+  const flushPops = () => { while (pops.length) items.push(pops.shift()); };
+  const popFor = (b) => {
+    if (!(b.pop && b.popOnShelf !== false && b.pop.length <= 40)) return null;
+    const pw = clamp(g.W * 0.14, 80, 124);
+    return { kind: 'pop', b, w: pw, pw, ph: clamp(g.maxBookH * 0.46, 60, 112) };
+  };
   for (const b of books) {
-    const face = b.face === 'cover' ? 'cover' : 'spine';
-    const size = face === 'cover' ? coverSize(g) : spineSize(b, g);
-    items.push({ kind: 'book', b, face, w: size.w + (face === 'cover' ? 6 : 0), size });
-    if (b.pop && b.popOnShelf !== false && b.pop.length <= 40) {
-      const pw = clamp(g.W * 0.14, 80, 124);
-      items.push({ kind: 'pop', b, w: pw, pw, ph: clamp(g.maxBookH * 0.46, 60, 112) });
+    const face = faceOf(b);
+    const vols = volumesOf(b);
+    if (face === 'flat') {
+      // consecutive flat books form one pile (bottom = earlier in the saved order)
+      const entries = (vols || [null]).map((v) => ({ b, vol: v ? v.label : null, volIndex: v ? v.index : null, size: flatSize(b, g, v) }));
+      for (const e of entries) {
+        const hNow = pile ? pile.entries.reduce((n, x) => n + x.size.h, 0) : 0;
+        if (!pile || pile.entries.length >= 5 || hNow + e.size.h > g.maxBookH * 0.92) {
+          pile = { kind: 'pile', face: 'pile', entries: [], w: 0 };
+          items.push(pile);
+        }
+        pile.entries.push(e);
+        pile.w = Math.max(pile.w, e.size.w + 10);
+      }
+      const p = popFor(b); if (p) pops.push(p);
+      continue;
     }
+    pile = null; flushPops();
+    if (face === 'cover') {
+      const size = coverSize(g);
+      items.push({ kind: 'book', b, face, w: size.w + 6, size });
+    } else if (vols && face === 'spine') {
+      for (const v of vols) {
+        const size = spineSize({ ...b, articleIds: v.articleIds, chars: undefined, kind: 'serial' }, g);
+        items.push({ kind: 'book', b, face: 'spine', vol: v.label, volIndex: v.index, w: size.w, size });
+      }
+    } else {
+      const size = spineSize(b, g);
+      const lean = face === 'lean';
+      items.push({ kind: 'book', b, face, lean, w: size.w + (lean ? size.h * LEAN : 0), size });
+    }
+    const p = popFor(b); if (p) items.push(p);
   }
+  flushPops();
   return items;
 }
 export const bookendW = (g) => clamp(g.maxBookH * 0.05, 8, 12);
@@ -246,8 +295,18 @@ function shelfGroup(shelf, books, g, theme, { empty, noDrag } = {}) {
     if (ends) { row.classList.add('centered'); row.appendChild(bookend('left')); }
     list.forEach((it, j) => {
       let el;
-      if (it.kind === 'book') {
-        el = it.face === 'cover' ? renderCover(it.b, theme, it.size) : renderSpine(it.b, theme, it.size);
+      if (it.kind === 'pile') {
+        el = h('div', { class: 'pile' });
+        el.style.width = it.w + 'px';
+        for (const e of it.entries) {
+          const fb = renderFlat(e.b, theme, { ...e.size, vol: e.vol, volIndex: e.volIndex });
+          // a natural, stable offset so the stack is not perfectly aligned
+          fb.style.marginLeft = ((bookDims(e.b).wf - 0.5) * 8 + (e.volIndex || 0) * 2) + 'px';
+          el.appendChild(fb);
+        }
+      } else if (it.kind === 'book') {
+        el = it.face === 'cover' ? renderCover(it.b, theme, it.size) : renderSpine(it.b, theme, { ...it.size, lean: it.lean, vol: it.vol, volIndex: it.volIndex });
+        if (it.lean) el.style.marginRight = (it.size.h * LEAN) + 'px';
       } else {
         el = h('button', { type: 'button', class: `pop-mini${theme.pop === 'dark' ? ' dark' : ''}`, 'data-pop-for': it.b.id, 'aria-label': `POP：${it.b.pop}` },
           h('span', { class: 'pop-card' }, it.b.pop), h('span', { class: 'pop-foot', 'aria-hidden': 'true' }));
@@ -264,6 +323,34 @@ function shelfGroup(shelf, books, g, theme, { empty, noDrag } = {}) {
     if (!list.length) bay.appendChild(h('p', { class: 'bay-empty' }, empty || 'まだ本がありません'));
     group.appendChild(bay);
   });
+  return group;
+}
+
+function monthlyBay(pick, g, theme) {
+  const label = `${monthLabel(pick.month)}の一冊`;
+  const group = h('section', { class: 'shelf-group monthly-group', 'aria-label': `店主の${label}` });
+  const bay = bayEl(g, theme);
+  bay.appendChild(shelfLabel(`店主の${label}`, g));
+  const row = h('div', { class: 'bay-row featured monthly', 'data-nodrag': '1' });
+  row.style.bottom = (g.rowBottom - 4) + 'px';
+  const narrow = g.W < 520;
+  const size = coverSize(g, 0.95);
+  const w = narrow ? Math.min(size.w, g.rowW * 0.42) : size.w;
+  row.appendChild(h('div', { class: 'feat' }, renderCover(pick.book, theme, { w, h: w / 0.7 }), h('span', { class: 'stand', 'aria-hidden': 'true' })));
+  const note = pick.note || pick.book.pop || '';
+  if (note) {
+    const cw = narrow ? g.rowW * 0.46 : clamp(g.rowW * 0.34, 150, 300);
+    const card = h('button', { type: 'button', class: `pop-sign monthly-note${theme.pop === 'dark' ? ' dark' : ''}`, 'data-pop-for': pick.book.id, 'aria-label': `店主のことば：${note}` },
+      h('span', { class: 'mn-text' }, note), sealEl(narrow ? 26 : 34));
+    card.style.width = cw + 'px';
+    card.style.minHeight = (w / 0.7) * 0.55 + 'px';
+    card.style.fontSize = clamp(cw / 13, 12, 18) + 'px';
+    card.style.marginBottom = '14px';
+    row.appendChild(card);
+  }
+  if (!pick.current && ctx.editing) bay.appendChild(h('p', { class: 'bay-empty monthly-hint' }, `${monthLabel(pick.month)}のままです。本を選んで「今月の一冊にする」で更新できます。`));
+  bay.appendChild(row);
+  group.appendChild(bay);
   return group;
 }
 
@@ -355,6 +442,8 @@ function renderPanel(theme) {
   const readable = ctx.canRead(b) ? arts.filter((a) => a.html) : [];
   const rt = readable.length ? bookReadingTime(readable) : null;
   const chips = bookMeta(b).map((t) => h('li', { class: 'chip' }, t));
+  const vols = volumesOf(b);
+  if (vols) chips.push(h('li', { class: 'chip' }, `全${vols.length}巻`));
   if (!arts.length && b.chapters && b.chapters.length > 1) chips.push(h('li', { class: 'chip' }, `全${b.chapters.length}話`));
   if (hasPaid(b) || b.paidNote || arts.some((a) => a.paidCut)) chips.push(h('li', { class: 'chip', title: 'noteでは一部が有料の記事です' }, '一部有料'));
   if (rt && rt.total) chips.push(h('li', { class: 'chip', title: `本文の文字数から ${CHARS_PER_MINUTE}字/分 で計算した目安です` }, `読了目安 ${formatMinutes(rt.total)}`));
@@ -385,11 +474,14 @@ function renderPanel(theme) {
     : !arts.length && b.chapters && b.chapters.length > 1 ? b.chapters.map((c) => ({ title: c.title, url: c.url, read: false })) : null;
   if (toc) {
     panel.appendChild(h('h3', { class: 'section-title' }, b.kind === 'anthology' ? '収録作品' : '目次'));
-    panel.appendChild(h('ol', { class: 'chapters' }, toc.map((c) => h('li', null,
+    const volStart = new Map((vols || []).map((v) => [v.articleIds[0], v.label]));
+    panel.appendChild(h('ol', { class: 'chapters' }, toc.flatMap((c) => [
+      volStart.has(c.id) ? h('li', { class: 'vol-head' }, `${volStart.get(c.id)}巻`) : null,
+      h('li', null,
       c.read
         ? h('button', { type: 'button', class: 'ch-link', onclick: () => ctx.onRead(b, { startArticleId: c.id }) }, h('span', { class: 'ch-t' }, c.title), c.min ? h('span', { class: 'ch-m' }, formatMinutes(c.min)) : null)
         : h('span', { class: 'ch-row' }, h('span', { class: 'ch-t' }, c.title),
-          c.url ? h('a', { class: 'ch-note', href: c.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `${c.title}をnoteで読む` }, 'noteで読む', icon('ext')) : null)))));
+          c.url ? h('a', { class: 'ch-note', href: c.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `${c.title}をnoteで読む` }, 'noteで読む', icon('ext')) : null))]).filter(Boolean)));
   }
   if (ctx.editing && ctx.editTools) panel.appendChild(ctx.editTools(b));
   return panel;
@@ -401,6 +493,8 @@ function ownerCard() {
   const av = s.avatarImageId && imageUrl(s.avatarImageId);
   if (av) card.appendChild(h('img', { class: 'avatar', src: av, alt: '' }));
   card.appendChild(h('h2', null, s.owner ? `店主 ${s.owner}` : (s.name || '')));
+  const seal = sealEl(56);
+  if (seal) card.appendChild(h('div', { class: 'owner-seal' }, seal));
   if (s.intro) card.appendChild(h('p', { class: 'intro' }, s.intro));
   if (s.profileUrl) card.appendChild(h('p', null, h('a', { class: 'btn', href: s.profileUrl, target: '_blank', rel: 'noopener noreferrer' }, 'noteのプロフィール', icon('ext'))));
   const count = visibleBooks().length;
@@ -464,8 +558,9 @@ function enableDrag(container) {
       if (!under) return;
       const row = under.closest('.bay-row:not([data-nodrag])');
       if (!row) return;
-      const target = under.closest('.book');
-      if (target && target !== bookEl && row.contains(target)) {
+      const tb = under.closest('.book');
+      const target = tb && row.contains(tb) ? [...row.children].find((c) => c === tb || c.contains(tb)) : null;
+      if (target && target !== bookEl && !target.contains(bookEl) && target.classList && !target.classList.contains('bookend')) {
         const tr = target.getBoundingClientRect();
         if (x < tr.left + tr.width / 2) row.insertBefore(marker, target);
         else row.insertBefore(marker, target.nextSibling);
@@ -489,8 +584,9 @@ function enableDrag(container) {
         const row = marker.parentNode;
         const shelfId = row.dataset.shelf || UNSORTED;
         let next = marker.nextElementSibling;
-        while (next && !next.classList.contains('book')) next = next.nextElementSibling;
-        const beforeId = next ? next.dataset.id : null;
+        const idOf = (el) => (el.classList.contains('book') ? el.dataset.id : el.querySelector('.book') ? el.querySelector('.book').dataset.id : null);
+        while (next && (!idOf(next) || idOf(next) === id)) next = next.nextElementSibling;
+        const beforeId = next ? idOf(next) : null;
         dropBook(id, shelfId, beforeId);
         dragState.justDropped = true;
         setTimeout(() => { dragState.justDropped = false; }, 400);

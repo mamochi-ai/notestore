@@ -5,6 +5,7 @@
 import { h, svg, rand01, hash32, clamp, textUnits, truncateUnits } from './util.js';
 import { inkFor, luminance } from './themes.js';
 import { S, coverImageId, imageUrl, bookArticles } from './state.js';
+import { obiOf, fadeOf, fadeFilter } from './individual.js';
 
 // ---------- titles ----------
 /** Deterministic short title for spines: drops leading 【tag】/emoji and trailing (…) notes. */
@@ -180,12 +181,14 @@ export function renderSpine(b, theme, o) {
   const look = bookLook(b, theme);
   const { w, h: ht } = o;
   const el = h('button', {
-    class: `book spine mat-${look.material} ss-${look.spineStyle}${look.light ? ' is-light' : ''}`,
+    class: `book spine mat-${look.material} ss-${look.spineStyle}${look.light ? ' is-light' : ''}${o.lean ? ' lean' : ''}`,
     type: 'button', 'data-id': b.id,
-    'aria-label': `${b.title}${b.kind !== 'single' ? `（全${b.articleIds.length}話）` : ''}`,
+    'aria-label': `${b.title}${o.vol ? `（${o.vol}巻）` : b.kind !== 'single' ? `（全${b.articleIds.length}話）` : ''}`,
   });
+  if (o.vol) el.dataset.vol = String(o.volIndex);
   setVars(el, look, w, ht);
   const face = h('span', { class: 'sp', 'aria-hidden': 'true' });
+  weather(face, b, look);
   const art = b.design.spineImageId ? artImg(b.design.spineImageId, b.design.spinePos) : null;
   if (art) { face.appendChild(art); el.classList.add('has-art'); }
   face.appendChild(h('span', { class: 'sp-band t' }));
@@ -199,10 +202,43 @@ export function renderSpine(b, theme, o) {
   } else {
     face.appendChild(h('span', { class: 'sp-label empty' }));
   }
-  if (ht > 120 && !art) face.appendChild(markSvg(look.mark));
+  if (o.vol) face.appendChild(h('span', { class: 'sp-vol' }, o.vol));
+  else if (ht > 120 && !art) face.appendChild(markSvg(look.mark));
   face.appendChild(h('span', { class: 'sp-band b' }));
+  const obi = obiOf(b);
+  if (obi && ht > 90) { const band = h('span', { class: 'sp-obi' }); band.style.background = obi.color; face.appendChild(band); el.classList.add('has-obi'); }
   el.appendChild(face);
   return el;
+}
+
+/** A book lying flat (平積み): its spine seen horizontally. o: {w (length), h (thickness)} */
+export function renderFlat(b, theme, o) {
+  const look = bookLook(b, theme);
+  const { w, h: ht } = o;
+  const el = h('button', {
+    class: `book flat mat-${look.material}${look.light ? ' is-light' : ''}`, type: 'button', 'data-id': b.id,
+    'aria-label': `${b.title}${o.vol ? `（${o.vol}巻）` : ''}（平積み）`,
+  });
+  if (o.vol) el.dataset.vol = String(o.volIndex);
+  setVars(el, look, w, ht);
+  const face = h('span', { class: 'sp fl', 'aria-hidden': 'true' });
+  weather(face, b, look);
+  const fs = clamp(Math.floor(ht * 0.5), 10, 15);
+  const t = h('span', { class: 'fl-title' }, truncateUnits(spineTitle(b), Math.max(4, Math.floor((w - 24) / (fs * 1.02)) - (o.vol ? 1 : 0))));
+  t.style.fontSize = fs + 'px';
+  face.append(h('span', { class: 'fl-band l' }), t);
+  if (o.vol) face.appendChild(h('span', { class: 'fl-vol' }, o.vol));
+  face.appendChild(h('span', { class: 'fl-band r' }));
+  const obi = obiOf(b);
+  if (obi) { const band = h('span', { class: 'fl-obi' }); band.style.background = obi.color; face.appendChild(band); }
+  el.appendChild(face);
+  return el;
+}
+
+function weather(face, b, look) {
+  const f = fadeOf(b);
+  const filt = fadeFilter(f, look.material === 'worn');
+  if (filt) face.style.filter = filt;
 }
 
 // ---------- cover ----------
@@ -227,15 +263,18 @@ export function renderCover(b, theme, o) {
   if (o.static) { el.setAttribute('tabindex', '-1'); el.setAttribute('aria-hidden', 'true'); }
   setVars(el, look, w, ht);
   const face = h('span', { class: 'cv', 'aria-hidden': 'true' });
+  weather(face, b, look);
   const d = b.design;
   const imgId = coverImageId(b);
+  const obi = obiOf(b);
   const showTitle = d.showTitle !== false;
   const fsBase = clamp(w * 0.105, 10, 34);
   // covers print the short title (tags / notes removed); the full title is shown in the panel
   const ct = coverTitle(b);
   const title = h('span', { class: `cv-title${d.titleWriting === 'vertical' ? ' vertical' : ''} align-${d.titleAlign || 'top'}` }, ct);
   title.style.fontSize = (textUnits(ct) > 22 ? fsBase * 0.82 : fsBase) + 'px';
-  const author = d.showAuthor !== false && authorName() ? h('span', { class: 'cv-author' }, authorName()) : null;
+  // the obi covers the lower part of the cover (as on real books), so the author name moves away
+  const author = d.showAuthor !== false && authorName() && !obi ? h('span', { class: 'cv-author' }, authorName()) : null;
 
   if (layout === 'full') {
     face.appendChild(artImg(imgId, d.coverPos));
@@ -251,6 +290,13 @@ export function renderCover(b, theme, o) {
     const m = (d.motif === 'none') ? null : motifSvg(look.motif, look);
     if (m) face.appendChild(m);
     if (author) face.appendChild(author);
+  }
+  if (obi) {
+    const band = h('span', { class: 'cv-obi' }, h('span', { class: 'cv-obi-t' }, obi.text));
+    band.style.background = obi.color; band.style.color = obi.ink;
+    band.style.fontSize = clamp(w * 0.074, 8, 22) + 'px';
+    face.appendChild(band);
+    el.classList.add('has-obi');
   }
   el.appendChild(face);
   el.appendChild(h('span', { class: 'pages', 'aria-hidden': 'true' }));

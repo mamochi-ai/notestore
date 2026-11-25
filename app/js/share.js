@@ -7,10 +7,11 @@ import { h, toast, clamp, isNoteUrl, safeHttpUrl, shareOrDownload, downloadBlob,
 import { openModal, alertDialog, progressDialog, btn, icon } from './ui.js';
 import { getTheme, THEME_MAP, inkFor } from './themes.js';
 import { S, UNSORTED, visibleBooks, booksOnShelf, bookArticles, bookUrl, bookStatus, coverImageId, imageUrl, newBook, STATUS_LABEL, byOrder } from './state.js';
-import { geometry, buildItems, packBays, orderedShelves, coverSize } from './shelf.js';
+import { geometry, buildItems, packBays, orderedShelves, coverSize, itemGap, bookendW } from './shelf.js';
 import { bookLook, spineTitle, coverTitle, spineFit, motifSvg, coverLayout, MOTIFS } from './bookview.js';
 import { sanitizeHtml } from './sanitize.js';
 import { splitHtml, markFor, hasPaid } from './paywall.js';
+import { cleanShopExtras, cleanBookExtras, faceOf, bookChars, bookDate, obiOf, fadeOf, prepareFade, sealText, monthlyPick, monthLabel } from './individual.js';
 import { extFor } from './images.js';
 
 export const LINK_MAX = 8000; // conservative total URL length (verified in Chromium; iOS Safari not yet verified on device)
@@ -78,6 +79,9 @@ export function buildPublicModel({ ids, bodyIds = new Set(), pop = true, blurb =
       id: b.id, title: b.title, spineTitle: b.spineTitle || null, kind: b.kind, mode: b.mode, writing: b.writing,
       shelfId: shop.shelves.some((x) => x.id === b.shelfId) ? b.shelfId : UNSORTED, order: b.order, face: b.face,
       seriesStatus: b.seriesStatus || null, url: bookUrl(b), paidNote: hasPaid(b),
+      face: faceOf(b), obi: { text: (b.obi && b.obi.text) || '', color: (b.obi && b.obi.color) || null }, volumes: b.volumes || 0,
+      ...(shop.thickness === 'length' && bookChars(b) ? { chars: Math.round(bookChars(b) / 100) * 100 || 100 } : {}),
+      ...(bookDate(b) ? { date: new Date(bookDate(b)).toISOString().slice(0, 10) } : {}),
       chapters: arts.length > 1 ? arts.map((a) => ({ title: a.title, url: a.url || null })) : [],
       pop: pop ? b.pop || '' : '', popOnShelf: b.popOnShelf !== false, blurb: blurb ? b.blurb || '' : '', forWhom: blurb ? b.forWhom || '' : '',
       design: {
@@ -107,6 +111,9 @@ export function buildPublicModel({ ids, bodyIds = new Set(), pop = true, blurb =
       name: shop.name, tagline: shop.tagline, owner: shop.owner, intro: intro ? shop.intro : '',
       profileUrl: shop.profileUrl || '', theme: shop.theme, featuredPop: shop.featuredPop || '',
       avatarImageId: intro ? addImg(shop.avatarImageId) : null,
+      signFont: shop.signFont || 'mincho', seal: { text: (shop.seal && shop.seal.text) || '', show: !(shop.seal && shop.seal.show === false) },
+      weathering: shop.weathering !== false, thickness: shop.thickness === 'length' ? 'length' : 'design',
+      monthly: shop.monthly && ids2.has(shop.monthly.bookId) ? { ...shop.monthly } : null,
     },
     shelves: usedShelves.map((s) => ({ id: s.id, name: s.name })),
     featured: shop.featured.filter((id) => ids2.has(id)),
@@ -154,7 +161,11 @@ export function encodeLink(model) {
     b: model.books.map((b) => {
       const o = { i: b.id, t: b.title, u: b.url, s: shelfIdx.get(b.shelfId) ?? 0 };
       if (b.spineTitle) o.x = b.spineTitle;
-      if (b.face === 'cover') o.f = 1;
+      if (b.face === 'cover') o.f = 1; else if (b.face === 'flat') o.f = 2; else if (b.face === 'lean') o.f = 3;
+      if (b.obi && b.obi.text) o.ob = [b.obi.text, (b.obi.color || '').slice(1)];
+      if (b.volumes) o.v = b.volumes;
+      if (b.chars) o.n = b.chars;
+      if (b.date) o.dt = b.date;
       if (b.kind !== 'single') o.k = b.kind === 'serial' ? 's' : 'a';
       if (b.chapters.length) o.c = b.chapters.map((c) => [c.title, c.url]);
       if (b.seriesStatus) o.st = b.seriesStatus === 'ongoing' ? 'o' : 'c';
@@ -173,6 +184,8 @@ export function encodeLink(model) {
       return o;
     }),
     r: model.featured.map((id) => model.books.findIndex((b) => b.id === id)).filter((i) => i >= 0),
+    x: [model.shop.signFont, model.shop.seal.text, model.shop.seal.show ? 1 : 0, model.shop.weathering ? 1 : 0, model.shop.thickness === 'length' ? 1 : 0],
+    ...(model.shop.monthly ? { mo: [model.books.findIndex((b) => b.id === model.shop.monthly.bookId), model.shop.monthly.month, model.shop.monthly.note || ''] } : {}),
   };
   const json = JSON.stringify(p);
   const data = b64url(deflateSync(strToU8(json), { level: 9 }));
@@ -211,7 +224,8 @@ export async function readShareFromHash(str) {
     const b = newBook({
       id, title, url, spineTitle: sstr(o.x, 80) || null,
       shelfId: Number.isInteger(o.s) && o.s >= 0 && o.s < shelves.length - 1 ? 'sh' + o.s : UNSORTED,
-      order: idx, face: o.f === 1 ? 'cover' : 'spine',
+      order: idx,
+      ...cleanBookExtras({ face: [null, 'cover', 'flat', 'lean'][o.f] || 'spine', obi: Array.isArray(o.ob) ? { text: o.ob[0], color: o.ob[1] ? '#' + o.ob[1] : null } : null, volumes: o.v, chars: o.n, date: o.dt }),
       kind: o.k === 's' ? 'serial' : o.k === 'a' ? 'anthology' : 'single',
       seriesStatus: o.st === 'o' ? 'ongoing' : o.st === 'c' ? 'complete' : null,
       pop: sstr(o.p, 200), popOnShelf: o.ps !== 0, blurb: sstr(o.d, 800), forWhom: sstr(o.w, 200), paidNote: o.pd === 1, status: 'publish',
@@ -233,6 +247,9 @@ export async function readShareFromHash(str) {
     featuredPop: sstr(json.fp, 40), avatarImageId: null, shelves,
     featured: (Array.isArray(json.r) ? json.r : []).filter((i) => Number.isInteger(i) && books[i]).slice(0, 3).map((i) => books[i].id),
   };
+  const x = Array.isArray(json.x) ? json.x : [];
+  const mo = Array.isArray(json.mo) && Number.isInteger(json.mo[0]) && books[json.mo[0]] ? { bookId: books[json.mo[0]].id, month: json.mo[1], note: json.mo[2] } : null;
+  Object.assign(shop, cleanShopExtras({ signFont: x[0], seal: { text: x[1], show: x[2] !== 0 }, weathering: x[3] !== 0, thickness: x[4] === 1 ? 'length' : 'design', monthly: mo }, new Set(books.map((b) => b.id))));
   return { shop, books, articles: [], images: [] };
 }
 
@@ -285,7 +302,7 @@ function openLinkShare() {
 // ======================= C. publish ZIP =======================
 const APP_FILES = [
   'app/css/app.css',
-  ...['main', 'util', 'themes', 'db', 'state', 'shelf', 'bookview', 'ui', 'sample', 'editor', 'reader', 'share', 'import-ui', 'importer', 'sanitize', 'images', 'zipsafe', 'organize', 'backup', 'readtime', 'paywall'].map((n) => `app/js/${n}.js`),
+  ...['main', 'util', 'themes', 'db', 'state', 'shelf', 'bookview', 'ui', 'sample', 'editor', 'reader', 'share', 'import-ui', 'importer', 'sanitize', 'images', 'zipsafe', 'organize', 'backup', 'readtime', 'paywall', 'individual'].map((n) => `app/js/${n}.js`),
   'app/vendor/fflate.js', 'app/vendor/fflate.LICENSE',
   'assets/ui/bookend.svg', 'assets/ui/pop-dark.svg', 'assets/ui/pop-paper.svg', 'assets/ui/shelf-label.svg', 'assets/ui/icon.svg', 'assets/ui/icon-180.png',
 ];
@@ -392,7 +409,8 @@ export async function loadPublishedData() {
       id, title: sstr(o.title, 300) || '無題', spineTitle: sstr(o.spineTitle, 80) || null,
       kind: ['single', 'serial', 'anthology'].includes(o.kind) ? o.kind : 'single', mode: o.mode === 'novel' ? 'novel' : 'post',
       writing: o.writing === 'vertical' ? 'vertical' : 'horizontal', shelfId: shelves.some((s) => s.id === o.shelfId) ? o.shelfId : UNSORTED,
-      order: Number(o.order) || idx, face: o.face === 'cover' ? 'cover' : 'spine',
+      order: Number(o.order) || idx,
+      ...cleanBookExtras(o),
       seriesStatus: ['ongoing', 'complete'].includes(o.seriesStatus) ? o.seriesStatus : null,
       url: isNoteUrl(o.url) ? safeHttpUrl(o.url) : null, pop: sstr(o.pop, 200), popOnShelf: o.popOnShelf !== false, blurb: sstr(o.blurb, 1000), forWhom: sstr(o.forWhom, 200), paidNote: o.paidNote === true,
       shareBody: Array.isArray(o.body) && o.body.length > 0,
@@ -423,6 +441,7 @@ export async function loadPublishedData() {
     avatarImageId: known.has(s.avatarImageId) ? s.avatarImageId : null, shelves,
     featured: (Array.isArray(j.featured) ? j.featured : []).filter((x) => ids.has(x)).slice(0, 3),
   };
+  Object.assign(shop, cleanShopExtras(s, ids));
   return { shop, books, articles, images };
 }
 
@@ -468,13 +487,16 @@ export async function paintShop({ shelfIds, featured, header }) {
   const g = geometry(inner, theme);
   const [shelfImg, labelImg] = await Promise.all([loadImage(theme.img), loadImage('assets/ui/shelf-label.svg')]);
   const segs = [];
+  prepareFade();
   if (header) segs.push({ type: 'header', h: 150 });
+  const pick = monthlyPick();
+  if (pick && eligible(pick.book)) segs.push({ type: 'monthly', h: g.H, book: pick.book, label: `店主の${monthLabel(pick.month)}の一冊` });
   const feat = featured ? S.shop.featured.map((id) => S.books.get(id)).filter((b) => b && !b.hidden && eligible(b)) : [];
   if (feat.length) segs.push({ type: 'featured', h: g.H, books: feat });
   for (const s of orderedShelves().filter((x) => shelfIds.includes(x.id))) {
     const books = booksOnShelf(s.id).filter(eligible);
     if (!books.length) continue;
-    const bays = packBays(buildItems(books, g).filter((it) => it.kind === 'book'), g);
+    const bays = packBays(buildItems(books, g).filter((it) => it.kind !== 'pop'), g);
     bays.forEach((items, i) => segs.push({ type: 'bay', h: g.H, items, label: i === 0 ? s.name : null }));
   }
   if (!segs.some((s) => s.type !== 'header')) return [];
@@ -505,7 +527,13 @@ export async function paintShop({ shelfIds, featured, header }) {
         sh.addColorStop(0, 'rgba(0,0,0,.42)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
         c.fillStyle = sh; c.fillRect(pad, y, inner, g.H * 0.16);
         const baseY = y + g.H - g.rowBottom;
-        if (s.type === 'featured') {
+        if (s.type === 'monthly') {
+          const size = coverSize(g, 0.95);
+          const x = pad + (inner - size.w) / 2;
+          await paintCover(c, s.book, theme, x, baseY - 4 - size.h, size.w, size.h);
+          paintStand(c, theme, x, baseY - 8, size.w);
+          paintLabel(c, labelImg, s.label, pad + inner * 0.045, y + g.labelTop, g.labelH);
+        } else if (s.type === 'featured') {
           const size = coverSize(g, 0.9);
           const gap = inner * 0.05;
           const total = s.books.length * size.w + (s.books.length - 1) * gap;
@@ -513,12 +541,27 @@ export async function paintShop({ shelfIds, featured, header }) {
           for (const b of s.books) { await paintCover(c, b, theme, x, baseY - 4 - size.h, size.w, size.h); paintStand(c, theme, x, baseY - 8, size.w); x += size.w + gap; }
           paintLabel(c, labelImg, '初めての方へ', pad + inner * 0.045, y + g.labelTop, g.labelH);
         } else {
-          let x = pad + inner * 0.035;
+          // same arrangement as the screen: centred group between bookends when it doesn't fill the bay
+          let used = 0;
+          s.items.forEach((it, j) => { used += it.w + itemGap(s.items[j - 1], it, g); });
+          const bw = bookendW(g), beH = clamp(g.maxBookH * 0.42, 34, 96);
+          const ends = g.rowW - used > bw * 2 + 6;
+          let x = pad + inner * 0.035 + (ends ? (g.rowW - used - bw * 2 - 2) / 2 : 0);
+          if (ends) { paintBookend(c, x, baseY - beH, bw, beH); x += bw + 1; }
+          s.items.forEach((it, j) => { x += itemGap(s.items[j - 1], it, g); it._x = x; x += it.w; });
           for (const it of s.items) {
-            if (it.face === 'cover') await paintCover(c, it.b, theme, x, baseY - it.size.h, it.size.w, it.size.h);
-            else await paintSpine(c, it.b, theme, x, baseY - it.size.h, it.size.w, it.size.h);
-            x += it.w + 2;
+            const ix = it._x;
+            if (it.kind === 'pile') {
+              let yy = baseY;
+              for (const e of it.entries) { yy -= e.size.h; paintFlat(c, e.b, theme, ix + 4 + (e.volIndex || 0) * 2, yy, e.size.w, e.size.h, e.vol); }
+            } else if (it.face === 'cover') await paintCover(c, it.b, theme, ix, baseY - it.size.h, it.size.w, it.size.h);
+            else if (it.lean) {
+              c.save(); c.translate(ix + it.size.w, baseY); c.rotate(6 * Math.PI / 180);
+              await paintSpine(c, it.b, theme, -it.size.w, -it.size.h, it.size.w, it.size.h, it.vol);
+              c.restore();
+            } else await paintSpine(c, it.b, theme, ix, baseY - it.size.h, it.size.w, it.size.h, it.vol);
           }
+          if (ends) paintBookend(c, x + 1, baseY - beH, bw, beH);
           if (s.label) paintLabel(c, labelImg, s.label, pad + inner * 0.045, y + g.labelTop, g.labelH);
         }
       }
@@ -541,6 +584,17 @@ function paintHeader(c, theme, x, y, w, hh) {
   const name = S.shop.name || 'わたしの小さな本屋';
   c.fillText(name, x + 40, y + (S.shop.tagline ? 58 : 70));
   if (S.shop.tagline) { c.font = `26px ${SERIF}`; c.fillStyle = theme.ui.sub; c.fillText(S.shop.tagline, x + 42, y + 106); }
+  const st = (S.shop.seal && S.shop.seal.show === false) ? '' : sealText();
+  if (st) {
+    const sz = 84, sx = x + w - sz - 40, sy = y + (hh - 10 - sz) / 2;
+    c.save(); c.translate(sx + sz / 2, sy + sz / 2); c.rotate(-4 * Math.PI / 180);
+    c.strokeStyle = '#b8322a'; c.lineWidth = 4; c.strokeRect(-sz / 2, -sz / 2, sz, sz);
+    c.fillStyle = '#b8322a'; c.font = `800 ${Array.from(st).length <= 2 ? 32 : 28}px ${SERIF}`;
+    const ch = Array.from(st);
+    const cols = ch.length <= 2 ? [ch] : [ch.slice(0, 2), ch.slice(2)];
+    cols.forEach((col, ci) => drawVertical(c, col.join(''), (cols.length === 1 ? 0 : ci === 0 ? 16 : -16), -(col.length * 30) / 2, 30, 1, 200));
+    c.restore();
+  }
 }
 
 function paintLabel(c, img, text, x, y, hgt) {
@@ -566,7 +620,32 @@ function shadowUnder(c, x, y, w) {
   c.fillStyle = gr; c.fillRect(x - w * 0.2, y - 6, w * 1.5, 14);
 }
 
-async function paintSpine(c, b, theme, x, y, w, ht) {
+function paintBookend(c, x, y, w, hh) {
+  const gr = c.createLinearGradient(x, 0, x + w, 0);
+  gr.addColorStop(0, '#5d4029'); gr.addColorStop(0.55, '#b58a54'); gr.addColorStop(1, '#715035');
+  c.fillStyle = gr; c.fillRect(x, y, w, hh);
+}
+function paintFade(c, b, x, y, w, hh) {
+  const f = fadeOf(b);
+  if (f > 0.005) { c.fillStyle = `rgba(236, 224, 196, ${(f * 0.75).toFixed(3)})`; c.fillRect(x, y, w, hh); }
+}
+function paintFlat(c, b, theme, x, y, w, hh, vol) {
+  const look = bookLook(b, theme);
+  c.save();
+  roundRect(c, x, y, w, hh, 2); c.clip();
+  c.fillStyle = look.color; c.fillRect(x, y, w, hh);
+  const gr = c.createLinearGradient(0, y, 0, y + hh);
+  gr.addColorStop(0, 'rgba(255,255,255,.2)'); gr.addColorStop(0.6, 'rgba(0,0,0,.04)'); gr.addColorStop(1, 'rgba(0,0,0,.32)');
+  c.fillStyle = gr; c.fillRect(x, y, w, hh);
+  const obi = obiOf(b);
+  if (obi) { c.fillStyle = obi.color; c.fillRect(x + w * 0.74, y, w * 0.18, hh); }
+  c.fillStyle = look.ink; c.font = `600 ${clamp(Math.floor(hh * 0.5), 10, 18)}px ${SERIF}`; c.textAlign = 'left'; c.textBaseline = 'middle';
+  c.fillText(spineTitle(b) + (vol ? `　${vol}` : ''), x + 12, y + hh / 2, w * (obi ? 0.6 : 0.85));
+  paintFade(c, b, x, y, w, hh);
+  c.restore();
+}
+
+async function paintSpine(c, b, theme, x, y, w, ht, vol) {
   const look = bookLook(b, theme);
   shadowUnder(c, x, y + ht, w);
   c.fillStyle = 'rgba(0,0,0,.25)'; c.fillRect(x + w, y + 6, 8, ht - 6);
@@ -593,6 +672,14 @@ async function paintSpine(c, b, theme, x, y, w, ht) {
   c.fillStyle = look.spineStyle === 'label' ? '#3b3026' : look.ink;
   c.font = `600 ${fit.fs}px ${SERIF}`;
   drawVertical(c, fit.text, x + w / 2, ty, fit.fs, fit.cols, fit.maxH);
+  const obi = obiOf(b);
+  if (obi) { c.fillStyle = obi.color; c.fillRect(x, y + ht * 0.86, w, ht * 0.14); }
+  if (vol) {
+    const r = Math.min(w * 0.32, 12), cy = y + ht * (obi ? 0.8 : 0.9);
+    c.strokeStyle = look.ink; c.lineWidth = 1; c.beginPath(); c.arc(x + w / 2, cy, r, 0, Math.PI * 2); c.stroke();
+    c.fillStyle = look.ink; c.font = `700 ${Math.round(r * 1.1)}px ${SERIF}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(vol, x + w / 2, cy + 1);
+  }
+  paintFade(c, b, x, y, w, ht);
   c.restore();
 }
 
@@ -675,7 +762,16 @@ async function paintCover(c, b, theme, x, y, w, ht) {
       lines.forEach((l, i) => c.fillText(l, x + w * 0.54, ty + i * fs * 1.5));
     }
   }
-  if (d.showAuthor !== false && S.shop.owner) {
+  const obi = obiOf(b);
+  if (obi) {
+    const oy = y + ht * 0.77;
+    c.fillStyle = obi.color; c.fillRect(x, oy, w, ht * 0.23);
+    c.fillStyle = obi.ink; c.font = `700 ${clamp(w * 0.074, 9, 26)}px ${SERIF}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    const lines = wrapLines(c, obi.text, w * 0.78).slice(0, 2);
+    lines.forEach((l, i) => c.fillText(l, x + w * 0.54, oy + ht * 0.115 + (i - (lines.length - 1) / 2) * clamp(w * 0.074, 9, 26) * 1.3));
+  }
+  paintFade(c, b, x, y, w, ht);
+  if (d.showAuthor !== false && S.shop.owner && !obi) {
     c.font = `${Math.max(9, w * 0.062)}px ${SERIF}`; c.textAlign = 'center'; c.textBaseline = 'bottom';
     c.fillStyle = layout === 'full' && imgId ? '#fff' : look.ink; c.globalAlpha = 0.85;
     c.fillText(S.shop.owner, x + w * 0.54, y + ht * 0.955, w * 0.8); c.globalAlpha = 1;

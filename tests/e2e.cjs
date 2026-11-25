@@ -204,7 +204,7 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
 
   await test('バックアップ書き出し→全削除→別環境で復元', async () => {
     const page = shop;
-    await page.evaluate(async () => { const st = await import('/app/js/state.js'); const b = [...st.S.books.values()].find((x) => !x.hidden); b.paywall = { [b.articleIds[0]]: { at: 1, text: '' } }; await st.saveBooks([b]); });
+    await page.evaluate(async () => { const st = await import('/app/js/state.js'); const b = [...st.S.books.values()].find((x) => !x.hidden); b.paywall = { [b.articleIds[0]]: { at: 1, text: '' } }; b.obi = { text: '帯のことば', color: '#2d4a6b' }; b.face = 'flat'; st.S.shop.seal = { text: '印', show: true }; st.S.shop.signFont = 'gothic'; st.S.shop.thickness = 'length'; st.S.shop.monthly = { bookId: b.id, month: '2026-11', note: 'ひとこと' }; await st.saveBooks([b]); await st.saveShop(); });
     const counts = await S(page, (st) => ({ b: st.S.books.size, a: st.S.articles.size, i: st.S.images.size, theme: st.S.shop.theme }));
     await page.locator('.editbar button', { hasText: 'お店の設定' }).click();
     const [dl] = await Promise.all([page.waitForEvent('download'), page.locator('.modal button', { hasText: 'バックアップを書き出す' }).click()]);
@@ -224,6 +224,8 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     assert(fw, 'forWhom lost in backup/restore');
     const pw = await S(p2, (st) => [...st.S.books.values()].some((b) => b.paywall && Object.values(b.paywall).some((v) => v.at === 1)));
     assert(pw, 'paywall lost in backup/restore');
+    const ex = await S(p2, (st) => { const b = [...st.S.books.values()].find((x) => x.obi && x.obi.text); return { obi: b && b.obi, face: b && b.face, seal: st.S.shop.seal, sign: st.S.shop.signFont, thick: st.S.shop.thickness, mo: st.S.shop.monthly }; });
+    assert(ex.obi && ex.obi.text === '帯のことば' && ex.face === 'flat' && ex.seal.text === '印' && ex.sign === 'gothic' && ex.thick === 'length' && ex.mo && ex.mo.note === 'ひとこと', 'individual settings lost in backup ' + JSON.stringify(ex));
     assert(JSON.stringify(c2) === JSON.stringify(counts), `mismatch ${JSON.stringify(counts)} vs ${JSON.stringify(c2)}`);
     const imgOk = await p2.locator('.book .book-art').first().evaluate((i) => new Promise((r) => (i.complete ? r(i.naturalWidth > 0) : (i.onload = () => r(i.naturalWidth > 0)))));
     assert(imgOk, 'restored image not displayed');
@@ -399,12 +401,12 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
             const rb = row.getBoundingClientRect();
             const kids = [...row.children];
             for (const k of kids) {
-              if (k.classList.contains('book') || k.classList.contains('pop-mini') || k.classList.contains('bookend')) res.bottom = Math.max(res.bottom, Math.abs(k.getBoundingClientRect().bottom - rb.bottom));
+              if (k.classList.contains('book') || k.classList.contains('pop-mini') || k.classList.contains('bookend') || k.classList.contains('pile')) res.bottom = Math.max(res.bottom, Math.abs(k.getBoundingClientRect().bottom - rb.bottom));
             }
             for (let i = 1; i < kids.length; i++) {
               const a = kids[i - 1], b = kids[i];
               const gap = b.getBoundingClientRect().left - a.getBoundingClientRect().right;
-              if (a.classList.contains('spine') && b.classList.contains('spine')) res.gaps.push(gap);
+              if (a.classList.contains('spine') && b.classList.contains('spine') && !a.classList.contains('lean')) res.gaps.push(gap);
               if (b.classList.contains('bookend') || a.classList.contains('bookend')) res.ends = Math.max(res.ends, gap);
             }
             if (row.classList.contains('centered')) {
@@ -417,7 +419,7 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
             const want = st.booksOnShelf(s.id).map((b) => b.id);
             const sec = [...document.querySelectorAll('.shelf-group')].find((g) => g.getAttribute('aria-label') === s.name);
             if (!sec) continue;
-            const got = [...sec.querySelectorAll('.book')].map((e) => e.dataset.id);
+            const got = [...sec.querySelectorAll('.book')].map((e) => e.dataset.id).filter((id, i, a) => id !== a[i - 1]); // volumes repeat the same book
             if (JSON.stringify(got) !== JSON.stringify(want)) res.order = false;
           }
           return res;
@@ -438,7 +440,7 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     const { ctx, page } = await newPage({ width: 1024, height: 768 });
     await page.goto(BASE);
     await page.getByText('サンプルの本屋を見る').click();
-    await page.locator('.bay .book.spine[data-id="bk8"]').click();
+    await page.locator('.bay .book.spine[data-id="bk8"]').first().click();
     const order = await page.locator('.detail').evaluate((d) => [...d.children].map((c) => c.className || c.tagName).join('|'));
     const idx = (k) => order.indexOf(k);
     assert(idx('detail-cover') < idx('meta') && idx('meta') < idx('blurb') && idx('blurb') < idx('reco') && idx('reco') < idx('detail-actions') && idx('detail-actions') < idx('chapters'), 'panel order: ' + order);
@@ -448,7 +450,7 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     await page.locator('.bay .book.spine[data-id="bk4"]').click();
     assert(!(await page.locator('.detail .reco, .detail .blurb').count()), 'empty sections shown');
     // TOC: open chapter 3 directly
-    await page.locator('.bay .book.spine[data-id="bk8"]').click();
+    await page.locator('.bay .book.spine[data-id="bk8"]').first().click();
     await page.locator('.detail .chapters .ch-link').nth(2).click();
     await page.waitForSelector('.reader');
     const t = await page.locator('.reader .ch-title').innerText();
@@ -578,6 +580,70 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     assert(!m.includes('PAIDTEXT') && m.includes('"paidCut":true') && m.includes('無料の最後') && m.includes('"paidNote":true'), 'paid part in public data: ' + m.slice(0, 300));
     await ctx.close();
     return `tcy ${tc.tcy.join(',')} / upright ${tc.upr.join(',')}`;
+  });
+
+  await test('お店らしさ：帯・平積み・立てかけ・分冊・日焼け・文字数の厚み・書体・店主の印・今月の一冊（表示・保存・共有）', async () => {
+    const { ctx, page } = await newPage({ width: 1024, height: 2400 });
+    await page.goto(BASE);
+    await page.getByText('サンプルの本屋を見る').click();
+    await page.waitForSelector('.bay .book');
+    const r = await page.evaluate(async () => {
+      const ind = await import('/app/js/individual.js');
+      const q = (s) => document.querySelector(s);
+      const pile = q('.pile');
+      const flats = pile ? [...pile.querySelectorAll('.book.flat')].map((e) => [e.dataset.id, e.getBoundingClientRect().top]) : [];
+      const lean = q('.book.lean');
+      return {
+        obiCover: !!q('.book.cover[data-id="bk1"] .cv-obi') && q('.book.cover[data-id="bk1"] .cv-obi').textContent,
+        obiFlat: !!q('.book.flat[data-id="bk9"] .fl-obi'),
+        flats, lean: lean && getComputedStyle(lean).transform !== 'none',
+        vols: [...document.querySelectorAll('.book.spine[data-id="bk8"] .sp-vol')].map((e) => e.textContent),
+        monthly: q('.monthly-group') && q('.monthly-group .shelf-label').textContent,
+        seal: ind.sealText(), sealShown: !!q('.shop-brand .seal'),
+        sign: document.documentElement.dataset.sign,
+      };
+    });
+    assert(r.obiCover === '三か月、誰にも読まれなかった。', 'obi on cover ' + r.obiCover);
+    assert(r.obiFlat, 'obi on flat book');
+    assert(r.flats.length === 2 && r.flats[0][0] === 'bk7' && r.flats[0][1] > r.flats[1][1], 'pile order (earlier book at the bottom): ' + JSON.stringify(r.flats));
+    assert(r.lean, 'lean rotation');
+    assert(JSON.stringify(r.vols) === '["上","中","下"]', 'volumes ' + r.vols);
+    assert(/^店主の\d{4}年\d{1,2}月の一冊$/.test(r.monthly), 'monthly ' + r.monthly);
+    assert(r.seal === '物語' && r.sealShown && r.sign === 'mincho', 'seal/sign');
+    // volume spine opens the same book; TOC shows volume heads
+    await page.locator('.book.spine[data-id="bk8"][data-vol="1"]').click();
+    assert((await page.locator('.detail .meta').innerText()).includes('全3巻'), 'volumes chip');
+    assert((await page.locator('.detail .chapters .vol-head').allInnerTexts()).join() === '上巻,中巻,下巻', 'volume heads');
+    // auto seal from owner name / fade / length thickness (pure logic)
+    const logic = await page.evaluate(async () => {
+      const ind = await import('/app/js/individual.js'); const st = await import('/app/js/state.js'); const shelf = await import('/app/js/shelf.js');
+      const auto = ind.sealText({ owner: 'まもち@AI', seal: { text: '' } });
+      st.S.shop.weathering = true; ind.prepareFade();
+      const old = ind.fadeOf(st.S.books.get('bk1')), neu = ind.fadeOf(st.S.books.get('bk10'));
+      st.S.shop.weathering = false; ind.prepareFade(); const off = ind.fadeOf(st.S.books.get('bk1'));
+      st.S.shop.thickness = 'length';
+      st.S.articles.get('s4').html = '<p>' + 'あ'.repeat(12000) + '</p>';
+      const g = shelf.geometry(900, (await import('/app/js/themes.js')).THEMES[0]);
+      const thick = shelf.spineSize(st.S.books.get('bk4'), g).w, thin = shelf.spineSize(st.S.books.get('bk2'), g).w;
+      st.S.shop.thickness = 'design';
+      return { auto, old, neu, off, thick, thin };
+    });
+    assert(logic.auto === 'まもち', 'auto seal ' + logic.auto);
+    assert(logic.old > logic.neu && logic.neu === 0 && logic.off === 0, 'fade ' + JSON.stringify(logic));
+    assert(logic.thick > logic.thin + 10, 'length thickness ' + JSON.stringify(logic));
+    // link share keeps every individual setting
+    const back = await page.evaluate(async () => {
+      const s = await import('/app/js/share.js'); const st = await import('/app/js/state.js');
+      for (const a of st.S.articles.values()) { a.status = 'publish'; a.url = 'https://note.com/x/n/' + a.id; }
+      st.S.shop.signFont = 'maru';
+      const m = s.buildPublicModel({ ids: new Set(st.S.books.keys()) });
+      const d = await s.readShareFromHash(s.encodeLink(m).url.split('#s=')[1]);
+      const B = (id) => d.books.find((b) => b.id === id);
+      return { obi: B('bk1').obi, face7: B('bk7').face, face10: B('bk10').face, vols: B('bk8').volumes, sign: d.shop.signFont, seal: d.shop.seal, monthly: d.shop.monthly && d.shop.monthly.bookId, date: B('bk1').date };
+    });
+    assert(back.obi.text === '三か月、誰にも読まれなかった。' && back.obi.color === '#c8452f' && back.face7 === 'flat' && back.face10 === 'lean' && back.vols === 3 && back.sign === 'maru' && back.seal.text === '物語' && back.monthly === 'bk6' && back.date, 'link roundtrip ' + JSON.stringify(back));
+    await ctx.close();
+    return 'obi/pile/lean/volumes/monthly/seal/fade/thickness/link ok';
   });
 
   // ---------- published ZIP ----------
