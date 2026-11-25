@@ -112,7 +112,7 @@ export function buildPublicModel({ ids, bodyIds = new Set(), pop = true, blurb =
       profileUrl: shop.profileUrl || '', theme: shop.theme, featuredPop: shop.featuredPop || '',
       avatarImageId: intro ? addImg(shop.avatarImageId) : null,
       signFont: shop.signFont || 'mincho', seal: { text: (shop.seal && shop.seal.text) || '', show: !(shop.seal && shop.seal.show === false) },
-      weathering: shop.weathering !== false, thickness: shop.thickness === 'length' ? 'length' : 'design',
+      weathering: shop.weathering !== false, thickness: shop.thickness === 'length' ? 'length' : 'design', lighting: shop.lighting === 'off' ? 'off' : 'auto',
       monthly: shop.monthly && ids2.has(shop.monthly.bookId) ? { ...shop.monthly } : null,
     },
     shelves: usedShelves.map((s) => ({ id: s.id, name: s.name })),
@@ -184,7 +184,7 @@ export function encodeLink(model) {
       return o;
     }),
     r: model.featured.map((id) => model.books.findIndex((b) => b.id === id)).filter((i) => i >= 0),
-    x: [model.shop.signFont, model.shop.seal.text, model.shop.seal.show ? 1 : 0, model.shop.weathering ? 1 : 0, model.shop.thickness === 'length' ? 1 : 0],
+    x: [model.shop.signFont, model.shop.seal.text, model.shop.seal.show ? 1 : 0, model.shop.weathering ? 1 : 0, model.shop.thickness === 'length' ? 1 : 0, model.shop.lighting === 'off' ? 0 : 1],
     ...(model.shop.monthly ? { mo: [model.books.findIndex((b) => b.id === model.shop.monthly.bookId), model.shop.monthly.month, model.shop.monthly.note || ''] } : {}),
   };
   const json = JSON.stringify(p);
@@ -249,7 +249,7 @@ export async function readShareFromHash(str) {
   };
   const x = Array.isArray(json.x) ? json.x : [];
   const mo = Array.isArray(json.mo) && Number.isInteger(json.mo[0]) && books[json.mo[0]] ? { bookId: books[json.mo[0]].id, month: json.mo[1], note: json.mo[2] } : null;
-  Object.assign(shop, cleanShopExtras({ signFont: x[0], seal: { text: x[1], show: x[2] !== 0 }, weathering: x[3] !== 0, thickness: x[4] === 1 ? 'length' : 'design', monthly: mo }, new Set(books.map((b) => b.id))));
+  Object.assign(shop, cleanShopExtras({ signFont: x[0], seal: { text: x[1], show: x[2] !== 0 }, weathering: x[3] !== 0, thickness: x[4] === 1 ? 'length' : 'design', lighting: x[5] === 0 ? 'off' : 'auto', monthly: mo }, new Set(books.map((b) => b.id))));
   return { shop, books, articles: [], images: [] };
 }
 

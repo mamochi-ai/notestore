@@ -137,6 +137,7 @@ export function cleanShopExtras(s, bookIds) {
     seal: { text: cstr(s.seal && s.seal.text, 4), show: !(s.seal && s.seal.show === false) },
     weathering: s.weathering !== false,
     thickness: s.thickness === 'length' ? 'length' : 'design',
+    lighting: s.lighting === 'off' ? 'off' : 'auto',
     monthly: m && typeof m === 'object' && bookIds.has(m.bookId) && /^\d{4}-\d{2}$/.test(m.month || '') ? { bookId: m.bookId, month: m.month, note: cstr(m.note, 120) } : null,
   };
 }
@@ -150,4 +151,29 @@ export function cleanBookExtras(o) {
     ...(Number.isFinite(o.chars) && o.chars > 0 ? { chars: Math.min(Math.round(o.chars), 5_000_000) } : {}),
     ...(typeof o.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(o.date) ? { date: o.date.slice(0, 10) } : {}),
   };
+}
+
+// ---------- lighting by time of day (店の明かり) ----------
+// Uses the VIEWER's local clock. 朝 5–10時 / 昼 10–16時 / 夕方 16–19時 / 夜 19–5時
+export const LIGHT_PHASES = [['morning', '朝'], ['day', '昼'], ['evening', '夕方'], ['night', '夜']];
+export function lightPhase(date = new Date()) {
+  const hr = date.getHours();
+  if (hr >= 5 && hr < 10) return 'morning';
+  if (hr >= 10 && hr < 16) return 'day';
+  if (hr >= 16 && hr < 19) return 'evening';
+  return 'night';
+}
+let lightPreview = null;
+/** Preview a phase temporarily (settings screen); null = back to the real setting. */
+export function previewLight(phase) { lightPreview = phase; applyLighting(); }
+export function applyLighting(root = document.documentElement) {
+  const off = !S.shop || S.shop.lighting === 'off';
+  root.dataset.light = lightPreview || (off ? 'day' : lightPhase());
+}
+let lightTimer = null;
+export function startLightClock() {
+  applyLighting();
+  if (lightTimer) return;
+  lightTimer = setInterval(() => applyLighting(), 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) applyLighting(); });
 }

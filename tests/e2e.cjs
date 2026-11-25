@@ -204,7 +204,7 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
 
   await test('バックアップ書き出し→全削除→別環境で復元', async () => {
     const page = shop;
-    await page.evaluate(async () => { const st = await import('/app/js/state.js'); const b = [...st.S.books.values()].find((x) => !x.hidden); b.paywall = { [b.articleIds[0]]: { at: 1, text: '' } }; b.obi = { text: '帯のことば', color: '#2d4a6b' }; b.face = 'flat'; st.S.shop.seal = { text: '印', show: true }; st.S.shop.signFont = 'gothic'; st.S.shop.thickness = 'length'; st.S.shop.monthly = { bookId: b.id, month: '2026-11', note: 'ひとこと' }; await st.saveBooks([b]); await st.saveShop(); });
+    await page.evaluate(async () => { const st = await import('/app/js/state.js'); const b = [...st.S.books.values()].find((x) => !x.hidden); b.paywall = { [b.articleIds[0]]: { at: 1, text: '' } }; b.obi = { text: '帯のことば', color: '#2d4a6b' }; b.face = 'flat'; st.S.shop.seal = { text: '印', show: true }; st.S.shop.signFont = 'gothic'; st.S.shop.thickness = 'length'; st.S.shop.monthly = { bookId: b.id, month: '2026-11', note: 'ひとこと' }; st.S.shop.lighting = 'off'; await st.saveBooks([b]); await st.saveShop(); });
     const counts = await S(page, (st) => ({ b: st.S.books.size, a: st.S.articles.size, i: st.S.images.size, theme: st.S.shop.theme }));
     await page.locator('.editbar button', { hasText: 'お店の設定' }).click();
     const [dl] = await Promise.all([page.waitForEvent('download'), page.locator('.modal button', { hasText: 'バックアップを書き出す' }).click()]);
@@ -224,8 +224,8 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     assert(fw, 'forWhom lost in backup/restore');
     const pw = await S(p2, (st) => [...st.S.books.values()].some((b) => b.paywall && Object.values(b.paywall).some((v) => v.at === 1)));
     assert(pw, 'paywall lost in backup/restore');
-    const ex = await S(p2, (st) => { const b = [...st.S.books.values()].find((x) => x.obi && x.obi.text); return { obi: b && b.obi, face: b && b.face, seal: st.S.shop.seal, sign: st.S.shop.signFont, thick: st.S.shop.thickness, mo: st.S.shop.monthly }; });
-    assert(ex.obi && ex.obi.text === '帯のことば' && ex.face === 'flat' && ex.seal.text === '印' && ex.sign === 'gothic' && ex.thick === 'length' && ex.mo && ex.mo.note === 'ひとこと', 'individual settings lost in backup ' + JSON.stringify(ex));
+    const ex = await S(p2, (st) => { const b = [...st.S.books.values()].find((x) => x.obi && x.obi.text); return { obi: b && b.obi, face: b && b.face, seal: st.S.shop.seal, sign: st.S.shop.signFont, thick: st.S.shop.thickness, mo: st.S.shop.monthly, light: st.S.shop.lighting }; });
+    assert(ex.obi && ex.obi.text === '帯のことば' && ex.face === 'flat' && ex.seal.text === '印' && ex.sign === 'gothic' && ex.thick === 'length' && ex.mo && ex.mo.note === 'ひとこと' && ex.light === 'off', 'individual settings lost in backup ' + JSON.stringify(ex));
     assert(JSON.stringify(c2) === JSON.stringify(counts), `mismatch ${JSON.stringify(counts)} vs ${JSON.stringify(c2)}`);
     const imgOk = await p2.locator('.book .book-art').first().evaluate((i) => new Promise((r) => (i.complete ? r(i.naturalWidth > 0) : (i.onload = () => r(i.naturalWidth > 0)))));
     assert(imgOk, 'restored image not displayed');
@@ -644,6 +644,42 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     assert(back.obi.text === '三か月、誰にも読まれなかった。' && back.obi.color === '#c8452f' && back.face7 === 'flat' && back.face10 === 'lean' && back.vols === 3 && back.sign === 'maru' && back.seal.text === '物語' && back.monthly === 'bk6' && back.date, 'link roundtrip ' + JSON.stringify(back));
     await ctx.close();
     return 'obi/pile/lean/volumes/monthly/seal/fade/thickness/link ok';
+  });
+
+  await test('店の明かり：時刻で朝・昼・夕方・夜／いつも昼の設定／試し見の解除／タップを妨げない／共有で保持', async () => {
+    const { ctx, page } = await newPage({ width: 1024, height: 900 });
+    await page.goto(BASE);
+    await page.getByText('サンプルの本屋を見る').click();
+    await page.waitForSelector('.bay .book');
+    const r = await page.evaluate(async () => {
+      const ind = await import('/app/js/individual.js'); const st = await import('/app/js/state.js');
+      const at = (hh) => ind.lightPhase(new Date(2026, 10, 25, hh, 30));
+      const phases = [4, 5, 9, 10, 15, 16, 18, 19, 23].map((hh) => `${hh}:${at(hh)}`);
+      const now = document.documentElement.dataset.light === ind.lightPhase();
+      st.S.shop.lighting = 'off'; ind.applyLighting(); const off = document.documentElement.dataset.light;
+      st.S.shop.lighting = 'auto'; ind.previewLight('night'); const pv = document.documentElement.dataset.light;
+      const layers = document.querySelectorAll('.bay .bay-tint').length === document.querySelectorAll('.bay').length;
+      const pe = getComputedStyle(document.querySelector('.bay-tint')).pointerEvents;
+      ind.previewLight(null); const back = document.documentElement.dataset.light === ind.lightPhase();
+      return { phases, now, off, pv, layers, pe, back };
+    });
+    assert(r.phases.join(' ') === '4:night 5:morning 9:morning 10:day 15:day 16:evening 18:evening 19:night 23:night', 'phases ' + r.phases);
+    assert(r.now && r.off === 'day' && r.pv === 'night' && r.layers && r.pe === 'none' && r.back, JSON.stringify(r));
+    // books remain tappable under the night light layer
+    await page.evaluate(async () => (await import('/app/js/individual.js')).previewLight('night'));
+    await page.locator('.bay .book.spine[data-id="bk2"]').click();
+    assert((await page.locator('.detail h2').innerText()).includes('はじめてのアプリ'), 'book not tappable under light layer');
+    // link share keeps the owner's choice
+    const lit = await page.evaluate(async () => {
+      const s = await import('/app/js/share.js'); const st = await import('/app/js/state.js');
+      for (const a of st.S.articles.values()) { a.status = 'publish'; a.url = 'https://note.com/x/n/' + a.id; }
+      st.S.shop.lighting = 'off';
+      const d = await s.readShareFromHash(s.encodeLink(s.buildPublicModel({ ids: new Set(st.S.books.keys()) })).url.split('#s=')[1]);
+      return d.shop.lighting;
+    });
+    assert(lit === 'off', 'lighting lost in link ' + lit);
+    await ctx.close();
+    return r.phases.join(' ');
   });
 
   // ---------- published ZIP ----------

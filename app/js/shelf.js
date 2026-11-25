@@ -3,7 +3,7 @@ import { h, clamp, textUnits, debounce, formatDate, $, $$, prefersReducedMotion 
 import { getTheme } from './themes.js';
 import { S, UNSORTED, visibleBooks, booksOnShelf, byOrder, bookArticles, bookUrl, bookStatus, STATUS_LABEL, imageUrl, saveBooks, saveShop, shelfExists } from './state.js';
 import { renderSpine, renderCover, renderFlat, bookDims, spineTitle, bookMeta, spineNeedsTwoCols } from './bookview.js';
-import { faceOf, volumesOf, lengthThickness, prepareFade, applySignFont, sealEl, monthlyPick, monthLabel } from './individual.js';
+import { faceOf, volumesOf, lengthThickness, prepareFade, applySignFont, sealEl, monthlyPick, monthLabel, startLightClock } from './individual.js';
 import { icon, logo, btn, anyModalOpen } from './ui.js';
 import { bookReadingTime, formatMinutes, CHARS_PER_MINUTE } from './readtime.js';
 import { hasPaid } from './paywall.js';
@@ -29,6 +29,7 @@ export function render() {
   if (!root || !S.shop) return;
   const theme = getTheme(S.shop.theme);
   applySignFont();
+  startLightClock();
   if (view.selected && !S.books.has(view.selected)) view.selected = null;
   if (view.tab !== 'all' && view.tab !== 'search' && !shelfExists(view.tab)) view.tab = 'all';
   root.classList.toggle('editing', !!ctx.editing);
@@ -178,6 +179,8 @@ function bayEl(g, theme) {
   bay.style.height = g.H + 'px';
   bay.style.backgroundImage = `url("${theme.img}")`;
   bay.style.backgroundSize = `${g.zoom * 100}% auto`;
+  // time-of-day light layers (styled per phase in CSS; inert for pointer and screen readers)
+  bay.append(h('span', { class: 'bay-tint', 'aria-hidden': 'true' }), h('span', { class: 'bay-glow', 'aria-hidden': 'true' }));
   return bay;
 }
 

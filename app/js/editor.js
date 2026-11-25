@@ -15,7 +15,7 @@ import { exportBackup, openRestore } from './backup.js';
 import { storageInfo } from './db.js';
 import { uid } from './util.js';
 import { listBlocks, locate } from './paywall.js';
-import { FACES, faceOf, OBI_COLORS, SIGN_FONTS, sealText, sealEl, thisMonth, monthLabel, volumeLabels } from './individual.js';
+import { FACES, faceOf, OBI_COLORS, SIGN_FONTS, sealText, sealEl, thisMonth, monthLabel, volumeLabels, LIGHT_PHASES, previewLight, lightPhase } from './individual.js';
 
 const rerender = () => render();
 
@@ -466,6 +466,12 @@ export function openShopSettings(ctx) {
   const drawSeal = () => sealPreview.replaceChildren(sealEl(52, { ...s, owner: owner.value, seal: { text: sealIn.value, show: true } }) || h('span', { class: 'hint' }, '（文字なし）'));
   sealIn.addEventListener('input', drawSeal); owner.addEventListener('input', drawSeal);
   drawSeal();
+  const lightSel = h('select', null, h('option', { value: 'auto', selected: s.lighting !== 'off' || null }, '時間帯で変える'), h('option', { value: 'off', selected: s.lighting === 'off' || null }, 'いつも昼の明かり'));
+  const lightTry = h('div', { class: 'seg', role: 'group', 'aria-label': '明かりの試し見' }, ...LIGHT_PHASES.map(([k, l]) => {
+    const b = h('button', { type: 'button', 'aria-pressed': 'false' }, l);
+    b.addEventListener('click', () => { previewLight(k); for (const x of b.parentNode.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); });
+    return b;
+  }), h('span', { class: 'hint', style: 'align-self:center;padding:0 8px' }, `いまは${LIGHT_PHASES.find(([k]) => k === lightPhase())[1]}`));
   const weatherCb = h('input', { type: 'checkbox', checked: s.weathering !== false || null });
   const thickSel = h('select', null, h('option', { value: 'design', selected: s.thickness !== 'length' || null }, '演出（見た目のばらつき）'), h('option', { value: 'length', selected: s.thickness === 'length' || null }, '本文の文字数'));
   const mPick = s.monthly && S.books.get(s.monthly.bookId);
@@ -500,6 +506,8 @@ export function openShopSettings(ctx) {
       h('p', { class: 'hint' }, '空欄なら店主名から作ります（最大4文字）。店名の横・店主欄・今月の一冊に押されます。')),
     h('label', { class: 'check' }, weatherCb, h('span', null, '日焼け：古い記事の本ほど背が少し褪せる（いちばん新しい本は褪せません）')),
     f('本の厚み', thickSel, '「本文の文字数」にすると、長く書いた本ほど厚くなります。本文の無い本はこれまでどおりの厚みです。'),
+    f('店の明かり', lightSel, '「時間帯で変える」にすると、訪れた人の端末の時刻に合わせて、朝・昼・夕方・夜で棚の光が変わります（読書画面と棚画像は変わりません）。'),
+    h('div', { class: 'field' }, h('span', null, '明かりを試し見（この画面を閉じると元に戻ります）'), lightTry),
     monthlyBox,
     h('h3', null, 'データの保存とバックアップ'),
     h('p', { class: 'hint' }, 'データはこの端末のブラウザの中だけに保存されています。Safariの「履歴とWebサイトデータを消去」などで消えることがあるため、ときどきバックアップを書き出してください。'),
@@ -516,14 +524,14 @@ export function openShopSettings(ctx) {
         ctx.goWelcome();
       }, { cls: 'danger' })));
   const m = openModal({
-    title: 'お店の設定', body,
+    title: 'お店の設定', body, onClose: () => previewLight(null),
     actions: [{ label: 'キャンセル' }, { label: '保存', primary: true, onClick: async () => {
       const url = profile.value.trim();
       if (url && !isNoteUrl(url)) { toast('プロフィールURLは https://note.com/ のURLを入れてください', 'error'); profile.focus(); return false; }
       s.name = name.value.trim() || 'わたしの小さな本屋'; s.tagline = tagline.value.trim(); s.owner = owner.value.trim();
       s.intro = intro.value.trim(); s.profileUrl = url ? safeHttpUrl(url) : ''; s.featuredPop = featPop.value.trim();
       s.signFont = signSel.value; s.seal = { text: sealIn.value.trim(), show: sealShow.checked };
-      s.weathering = weatherCb.checked; s.thickness = thickSel.value;
+      s.weathering = weatherCb.checked; s.thickness = thickSel.value; s.lighting = lightSel.value;
       if (s.monthly && mPick) s.monthly = { ...s.monthly, note: monthlyNote.value.trim() };
       const images = [];
       if (pendingAvatar) { images.push(pendingAvatar); avatarId = pendingAvatar.id; }

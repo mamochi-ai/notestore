@@ -40,6 +40,7 @@ export function defaultShop() {
     weathering: true,               // 日焼け（古い本ほど背が褪せる）
     thickness: 'design',            // 本の厚み: design（演出） | length（本文の文字数）
     monthly: null,                  // 今月の一冊 {bookId, month:'YYYY-MM', note}
+    lighting: 'auto',               // 店の明かり: auto（見ている人の時刻で朝・昼・夕方・夜） | off（いつも昼）
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
 }
