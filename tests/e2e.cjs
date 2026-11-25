@@ -729,6 +729,40 @@ async function importFile(page, file, { select = 'default', suggestions = 'skip'
     return `正式名「${full}」／印刷「${v}」`;
   });
 
+  await test('使い方：最初の画面・編集バー・サンプル・共有リンクから開ける／初回の案内カードは閉じると出ない', async () => {
+    const { ctx, page } = await newPage({ width: 390, height: 844 });
+    await page.goto(BASE);
+    await page.getByRole('button', { name: '使い方を見る' }).click();
+    assert((await page.locator('.modal h2').innerText()) === '使い方', 'welcome help');
+    const secs = await page.locator('.help-sec > summary').allInnerTexts();
+    assert(secs.length >= 8, 'sections ' + secs.length);
+    // every boxed name in the help must be a real button / label on screen (checked against known UI names)
+    const names = await page.evaluate(() => [...document.querySelectorAll('.help .ui-name')].map((e) => e.textContent));
+    const known = ['noteの記事を読み込む', '記事を読み込む', '選んだ○件を本にする', '移動先', '前へ', '後ろへ', '置き方', 'おすすめに飾る', '棚', '本と連載', '装丁・POPを編集', '保存', 'お店の設定', '看板・棚札の書体', '店主の印', '日焼け', '本の厚み', '店の明かり', '今月の一冊にする', 'テーマ', 'この本を読む', '目次', '表示', 'しおり', '棚へ戻る', 'シェア', 'プレビュー', 'バックアップを書き出す', 'バックアップから復元する', 'noteで読む', '店主'];
+    const unknown = [...new Set(names)].filter((n) => !known.includes(n));
+    assert(!unknown.length, 'help mentions unknown buttons: ' + unknown.join(','));
+    await page.keyboard.press('Escape');
+    await importFile(page, path.join(FX, 'with-images.zip'), { select: 'all' });
+    assert(await page.locator('.guide-card').count() === 1, 'guide card on first shop');
+    await page.locator('.guide-card button', { hasText: 'もう表示しない' }).click();
+    await page.reload();
+    await page.waitForSelector('.editbar');
+    assert(await page.locator('.guide-card').count() === 0, 'guide card should stay closed');
+    await page.locator('.editbar button', { hasText: '使い方' }).click();
+    assert((await page.locator('.modal h2').innerText()) === '使い方', 'editbar help');
+    await page.keyboard.press('Escape');
+    const url = await page.evaluate(async () => { const s = await import('/app/js/share.js'); const st = await import('/app/js/state.js'); return s.encodeLink(s.buildPublicModel({ ids: new Set(st.S.books.keys()) })).url; });
+    await ctx.close();
+    const { ctx: c2, page: v } = await newPage({ width: 390, height: 844 });
+    await v.goto(url);
+    await v.waitForSelector('.bay .book');
+    await v.getByRole('button', { name: '見かた' }).click();
+    assert((await v.locator('.modal h2').innerText()) === 'この本屋の見かた', 'visitor help');
+    assert(!(await v.locator('.modal').innerText()).includes('装丁・POPを編集'), 'visitor help must not show owner operations');
+    await c2.close();
+    return `${secs.length} sections; boxed names all real`;
+  });
+
   // ---------- published ZIP ----------
   await test('公開用ZIP：静的配置で表示・画像あり・本文は許可した本のみ', async () => {
     const page = shop;

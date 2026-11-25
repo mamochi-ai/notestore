@@ -302,7 +302,7 @@ function openLinkShare() {
 // ======================= C. publish ZIP =======================
 const APP_FILES = [
   'app/css/app.css',
-  ...['main', 'util', 'themes', 'db', 'state', 'shelf', 'bookview', 'ui', 'sample', 'editor', 'reader', 'share', 'import-ui', 'importer', 'sanitize', 'images', 'zipsafe', 'organize', 'backup', 'readtime', 'paywall', 'individual'].map((n) => `app/js/${n}.js`),
+  ...['main', 'util', 'themes', 'db', 'state', 'shelf', 'bookview', 'ui', 'sample', 'editor', 'reader', 'share', 'import-ui', 'importer', 'sanitize', 'images', 'zipsafe', 'organize', 'backup', 'readtime', 'paywall', 'individual', 'help'].map((n) => `app/js/${n}.js`),
   'app/vendor/fflate.js', 'app/vendor/fflate.LICENSE',
   'assets/ui/bookend.svg', 'assets/ui/pop-dark.svg', 'assets/ui/pop-paper.svg', 'assets/ui/shelf-label.svg', 'assets/ui/icon.svg', 'assets/ui/icon-180.png',
 ];

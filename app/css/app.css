@@ -795,3 +795,36 @@ img { max-width: 100%; }
 .pile-top { align-self: center; position: relative; z-index: 1; margin-bottom: -2px; transform: rotate(-1.5deg); transform-origin: 50% 100%; }
 .pile-top .book::before { display: none; }
 .pile-top .book::after { left: 4%; right: 4%; bottom: -3px; height: 5px; }
+
+/* ===================== 使い方 ===================== */
+.help { display: grid; gap: 10px; }
+.help-sec { border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--paper) 70%, var(--bg)); }
+.help-sec > summary {
+  list-style: none; cursor: pointer; padding: 14px 16px; min-height: 48px; display: flex; align-items: center; gap: 10px;
+  font-family: var(--serif); font-weight: 700; font-size: 16px; letter-spacing: .04em;
+}
+.help-sec > summary::-webkit-details-marker { display: none; }
+.help-sec > summary::after { content: "＋"; margin-left: auto; color: var(--sub); font-family: var(--sans); }
+.help-sec[open] > summary::after { content: "－"; }
+.help-body { padding: 0 18px 16px; font-size: 15px; line-height: 1.85; }
+.help-body p { margin: 0 0 .8em; }
+.help-steps { margin: 0 0 .8em; padding-left: 1.6em; }
+.help-steps li { margin-bottom: .5em; padding-left: .2em; }
+.help-steps li::marker { font-family: var(--serif); font-weight: 700; color: var(--accent); }
+.help-list { margin: 0 0 .8em; padding-left: 1.2em; }
+.help-dl { margin: 0 0 .8em; display: grid; gap: 2px 0; }
+.help-dl dt { font-weight: 700; margin-top: .6em; }
+.help-dl dd { margin: 0; color: var(--ink); }
+.help-tip { font-size: 13px; color: var(--sub); padding: 8px 12px; border-left: 3px solid var(--line); background: var(--chip); border-radius: 0 8px 8px 0; }
+.ui-name { display: inline-block; padding: 0 .4em; margin: 0 .1em; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); font-weight: 600; font-size: .95em; line-height: 1.6; }
+
+/* はじめての方への案内カード（編集中のみ・閉じたら出ない） */
+.guide-card {
+  max-width: 1180px; margin: 0 auto 14px; padding: 14px 16px; border-radius: 14px;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow-soft);
+}
+.guide-head { display: flex; align-items: center; gap: 8px; font-family: var(--serif); font-size: 16px; }
+.guide-head .icon-btn { margin-left: auto; }
+.guide-steps { margin: 6px 0 10px; padding-left: 1.5em; font-size: 14px; line-height: 1.8; }
+.guide-steps li::marker { color: var(--accent); font-weight: 700; }
+.guide-foot { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }

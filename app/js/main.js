@@ -13,6 +13,7 @@ import { openReader } from './reader.js';
 import { openShareCenter, readShareFromHash, loadPublishedData } from './share.js';
 import { startImport } from './import-ui.js';
 import { requestPersist } from './db.js';
+import { openHelp, guideCard } from './help.js';
 
 const app = { mode: 'edit', storageOk: true };
 const appEl = () => document.getElementById('app');
@@ -71,6 +72,7 @@ export function showWelcome() {
     h('div', { class: 'welcome-actions' },
       btn('noteの記事を読み込む', () => fileInput.click(), { cls: 'primary', iconName: 'upload' }),
       btn('サンプルの本屋を見る', showSample, { iconName: 'eye' }),
+      btn('使い方を見る', () => openHelp({}), { iconName: 'book' }),
       fileInput),
     h('p', { class: 'fine' }, 'noteのエクスポート機能で書き出したZIP（XMLと画像）またはXMLファイルを選んでください。ファイルはこの端末の中だけで処理され、どこにも送信されません。'),
     app.storageOk ? null : h('p', { class: 'note-box warn' }, 'この環境では端末への保存が使えないようです（プライベートブラウズなど）。サンプルは見られますが、本屋を保存できません。'),
@@ -107,6 +109,7 @@ export function showShop() {
     canRead,
     onRead: (b, opts = {}) => openReader(b, opts),
     editTools: editing ? (b) => editor.bookTools(b, ctxApi) : null,
+    guide: editing ? () => guideCard() : null,
   });
 }
 
@@ -128,6 +131,9 @@ function canRead(b) {
 function headerActions() {
   const owner = btn('店主', () => { view.owner = true; view.selected = null; render(); }, { cls: 'ghost small', iconName: 'user', attrs: { 'aria-label': '店主について' } });
   const list = [owner];
+  // visitors of a shared / published shop get a short "how to browse"; the sample shows the owner's guide
+  if (S.source === 'link' || S.source === 'published') list.unshift(btn('見かた', () => openHelp({ audience: 'visitor' }), { cls: 'ghost small', iconName: 'book' }));
+  else if (S.source === 'sample') list.unshift(btn('使い方', () => openHelp({}), { cls: 'ghost small', iconName: 'book' }));
   if (app.mode === 'edit') {
     list.push(btn('お店をシェア', () => openShareCenter(ctxApi), { cls: 'small', iconName: 'share' }));
   }
@@ -149,6 +155,7 @@ function editBar() {
     btn('テーマ', () => editor.openThemePicker(ctxApi), { iconName: 'palette' }),
     btn('お店の設定', () => editor.openShopSettings(ctxApi), { iconName: 'gear' }),
     btn('シェア', () => openShareCenter(ctxApi), { iconName: 'share' }),
+    btn('使い方', () => openHelp({}), { iconName: 'book' }),
     btn('プレビュー', () => { app.mode = 'preview'; view.selected = null; showShop(); window.scrollTo(0, 0); }, { cls: 'primary', iconName: 'eye' }),
     st);
 }

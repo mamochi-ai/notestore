@@ -48,6 +48,8 @@ export function render({ keepScroll = true } = {}) {
   const main = h('div', { class: 'shop-main with-panel' });
   const wrap = h('div', { class: 'case-wrap' });
   caseEl = h('div', { class: 'case', role: 'region', 'aria-label': '本棚' });
+  const guide = ctx.guide ? ctx.guide() : null;
+  if (guide) wrap.appendChild(guide);
   wrap.appendChild(caseEl);
   main.appendChild(wrap);
   const panel = renderPanel(theme);
