@@ -762,7 +762,15 @@ async function paintCover(c, b, theme, x, y, w, ht) {
     c.font = `600 ${fs}px ${SERIF}`;
     if (d.titleWriting === 'vertical') drawVertical(c, ct, x + w * 0.7, y + ht * 0.09, fs, 2, ht * 0.7);
     else {
-      const lines = wrapLines(c, ct, w * 0.76).slice(0, layout === 'plate' && imgId ? 3 : 4);
+      const all = wrapLines(c, ct, w * 0.76);
+      const max = layout === 'plate' && imgId ? 3 : 4;
+      const lines = all.slice(0, max);
+      if (all.length > max) {
+        // same as the screen: a cut title ends with an ellipsis
+        let last = lines[max - 1];
+        while (last && c.measureText(last + '…').width > w * 0.76) last = Array.from(last).slice(0, -1).join('');
+        lines[max - 1] = last + '…';
+      }
       c.textAlign = 'center'; c.textBaseline = 'top';
       const ty = d.titleAlign === 'center' ? y + ht * 0.3 : d.titleAlign === 'bottom' ? y + ht * 0.84 - lines.length * fs * 1.5 : y + ht * 0.1;
       lines.forEach((l, i) => c.fillText(l, x + w * 0.54, ty + i * fs * 1.5));
